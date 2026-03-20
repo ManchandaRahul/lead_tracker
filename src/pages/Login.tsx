@@ -52,7 +52,7 @@ export default function Login() {
     <div style={styles.wrapper}>
       <div style={styles.card}>
         <div style={styles.logo}>
-          <img src="/k1.svg" alt="Karuyaki Logo" style={{ height: 6 }} />
+          <img src="/k1.svg" alt="Karuyaki Logo" style={{ height: 40 }} />
         </div>
         <h1 style={styles.title}>Lead Tracker</h1>
         <p style={styles.subtitle}>Sign in to manage your pipeline</p>
