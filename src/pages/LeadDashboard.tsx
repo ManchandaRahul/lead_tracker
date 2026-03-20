@@ -415,10 +415,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           >
             + Add Lead
           </button>
+          <button onClick={logout} style={S.btnLogout}>Logout</button>
         </div>
-
-        {/* ── Logout always far right ── */}
-        <button onClick={logout} style={S.btnLogout}>Logout</button>
       </div>
 
       {/* ── Import result ── */}
@@ -738,35 +736,37 @@ const S: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "16px 24px",
+    padding: "12px 24px",
     background: "#ffffff",
     borderBottom: "1px solid #e2e8f0",
     position: "sticky",
     top: 0,
     zIndex: 100,
-    gap: 12,
-    flexWrap: "wrap",
+    gap: 8,
+    flexWrap: "nowrap",
+    minWidth: 0,
   },
   headerLeft: { display: "flex", alignItems: "center", gap: 10 },
   headerTitle: { fontSize: 20, fontWeight: 700, margin: 0, letterSpacing: "-0.4px" },
   // ── Nav tabs ──
   navTabs: { display: "flex", alignItems: "center", gap: 4 },
   navTab: {
-    padding: "6px 14px",
+    padding: "5px 10px",
     background: "transparent",
     color: "#64748b",
     border: "1.5px solid #e2e8f0",
     borderRadius: 8,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 600,
     cursor: "pointer",
+    whiteSpace: "nowrap",
   },
   navTabActive: {
     background: "#0f172a",
     color: "#fff",
     border: "1.5px solid #0f172a",
   },
-  headerRight: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  headerRight: { display: "flex", alignItems: "center", gap: 6, flexWrap: "nowrap", flexShrink: 1, minWidth: 0 },
   searchInput: {
     padding: "8px 12px",
     borderRadius: 8,
@@ -774,7 +774,7 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 13,
     background: "#f8fafc",
     outline: "none",
-    width: 200,
+    width: 160,
   },
   select: {
     padding: "8px 10px",
