@@ -397,7 +397,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             {STATUSES.map((s) => <option key={s}>{s}</option>)}
           </select>
           {/* Import Excel */}
-          <label style={S.btnOutline}>
+          {/* <label style={S.btnOutline}>
             {importing ? "Importing…" : "Import Excel"}
             <input
               ref={importRef}
@@ -406,7 +406,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
               style={{ display: "none" }}
               onChange={handleImport}
             />
-          </label>
+          </label> */}
           <button onClick={() => setShowColModal(true)} style={S.btnOutline}>Columns</button>
           <button onClick={downloadExcel} style={S.btnDark}>Export Excel</button>
           <button
