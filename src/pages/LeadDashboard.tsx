@@ -608,14 +608,13 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                         "Program Name": "The overall program or initiative this engagement falls under",
                         "Engagement Name": "Name of the specific engagement within the project",
                         "Engagement Type": "e.g. Development, M&S, Consulting, Support, Implementation",
-                        "Client Designation": "Job title or designation of the client SPOC",
-                        "Partner Designation": "Job title or designation of the partner SPOC",
+
+                       
                       } as Record<string,string>)[h] && <Tooltip text={({
                         "Program Name": "The overall program or initiative this engagement falls under",
                         "Engagement Name": "Name of the specific engagement within the project",
                         "Engagement Type": "e.g. Development, M&S, Consulting, Support, Implementation",
-                        "Client Designation": "Job title or designation of the client SPOC",
-                        "Partner Designation": "Job title or designation of the partner SPOC",
+                        
                       } as Record<string,string>)[h]} />}
                     </span>
                   </th>
