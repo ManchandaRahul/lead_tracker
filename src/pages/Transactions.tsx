@@ -54,7 +54,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
   const [deleteModal, setDeleteModal] = useState<{ activity: Activity } | null>(null);
   const [showColModal, setShowColModal] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
-    "Account Name": true,
+    "Client Name": true,
     "Activity Name": true,
     "Date": true,
     "Stage": true,
@@ -141,7 +141,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
 
   const downloadExcel = () => {
     const allCols: Record<string, (a: Activity) => any> = {
-      "Account Name":  (a) => a.accountName,
+      "Client Name":  (a) => a.accountName,
       "Activity Name": (a) => a.activityName,
       "Date":          (a) => a.activityDate,
       "Stage":         (a) => a.stage,
@@ -253,7 +253,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
               </div>
               {/* Account Name - read only */}
               <div style={S.formField}>
-                <label style={S.fLabel}>Account Name</label>
+                <label style={S.fLabel}>Client Name</label>
                 <input style={{ ...S.fInput, background: "#f1f5f9" }} value={formData.accountName} readOnly />
               </div>
               {/* Activity Name */}
@@ -305,7 +305,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Account Name", "Activity Name", "Date", "Stage", "Handled By", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
+                {(["Client Name", "Activity Name", "Date", "Stage", "Handled By", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
                   <th key={h} style={S.th}>{h}</th>
                 ))}
               </tr>
@@ -320,7 +320,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
                 <tr key={a.id} style={S.tr}
                   onMouseEnter={e => (e.currentTarget.style.background = "#f8fafc")}
                   onMouseLeave={e => (e.currentTarget.style.background = "")}>
-                  {visibleCols["Account Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 140 }}>{a.accountName}</td>}
+                  {visibleCols["Client Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 140 }}>{a.accountName}</td>}
                   {visibleCols["Activity Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 160 }}>{a.activityName}</td>}
                   {visibleCols["Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{a.activityDate || "-"}</td>}
                   {visibleCols["Stage"] && <td style={S.td}>
@@ -358,7 +358,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
             </div>
 
             {[
-              { title: "Activity Info", cols: ["Account Name", "Activity Name", "Date", "Stage", "Handled By", "Notes"] },
+              { title: "Activity Info", cols: ["Client Name", "Activity Name", "Date", "Stage", "Handled By", "Notes"] },
             ].map(({ title, cols }) => (
               <div key={title} style={{ marginBottom: 20 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid #f1f5f9" }}>

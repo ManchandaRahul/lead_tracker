@@ -31,6 +31,7 @@ const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
 const EMPTY_LEAD = {
   leadId: "",
   leadDate: "",
+  programName: "",
   projectId: "",
   accountName: "",
   engagementName: "",
@@ -55,6 +56,8 @@ const EXCEL_MAP: Record<string, keyof typeof EMPTY_LEAD> = {
   "Lead Date":             "leadDate",
   "Project Name":          "projectId",
   "Project ID":            "projectId",
+  "Client Name":           "accountName",
+  "Program Name":          "programName",
   "Account Name":          "accountName",
   "Engagement Name":       "engagementName",
   "Engagement Type":       "engagementType",
@@ -82,14 +85,14 @@ function Tooltip({ text }: { text: string }) {
       <span
         onMouseEnter={() => setVisible(true)}
         onMouseLeave={() => setVisible(false)}
-        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 15, height: 15, borderRadius: "50%", background: "#e2e8f0", color: "#64748b", fontSize: 10, fontWeight: 700, cursor: "default", userSelect: "none" }}
+        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 15, height: 15, borderRadius: "50%", background: "#e2e8f0", color: "#64748b", fontSize: 10, fontWeight: 700, cursor: "default", userSelect: "none", flexShrink: 0 }}
       >
         i
       </span>
       {visible && (
-        <span style={{ position: "absolute", bottom: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)", background: "#0f172a", color: "#fff", fontSize: 11, padding: "5px 9px", borderRadius: 6, whiteSpace: "nowrap", zIndex: 999, pointerEvents: "none", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}>
+        <span style={{ position: "fixed", background: "#0f172a", color: "#fff", fontSize: 11, padding: "6px 10px", borderRadius: 6, whiteSpace: "nowrap", zIndex: 9999, pointerEvents: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.3)", transform: "translateY(-120%)", marginLeft: -8 }}>
           {text}
-          <span style={{ position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)", borderWidth: 4, borderStyle: "solid", borderColor: "#0f172a transparent transparent transparent" }} />
+          <span style={{ position: "absolute", top: "100%", left: 12, borderWidth: 4, borderStyle: "solid", borderColor: "#0f172a transparent transparent transparent" }} />
         </span>
       )}
     </span>
@@ -112,7 +115,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const [showColModal, setShowColModal] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
     // Lead Info
-    "Lead Date": true, "Project Name": true, "Account Name": true,
+    "Lead Date": true, "Client Name": true, "Program Name": true,
+    "Project Name": true,
     "Engagement Name": true, "Engagement Type": true, "Status": true, "Remarks": true,
     // Client SPOC
     "Client SPOC": true, "Client Designation": true, "Client Email": true, "Client Phone": true,
@@ -144,6 +148,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
         const q = search.toLowerCase();
         return (
           l.leadId?.toLowerCase().includes(q) ||
+          (l as any).programName?.toLowerCase().includes(q) ||
           l.accountName?.toLowerCase().includes(q) ||
           l.engagementName?.toLowerCase().includes(q) ||
           l.clientSpoc?.toLowerCase().includes(q) ||
@@ -266,8 +271,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     // Full row map
     const allCols: Record<string, (l: Lead) => any> = {
       "Lead Date":          (l) => l.leadDate || "",
+      "Client Name":        (l) => l.accountName,
+      "Program Name":       (l) => (l as any).programName || "",
       "Project Name":       (l) => l.projectId,
-      "Account Name":       (l) => l.accountName,
       "Engagement Name":    (l) => l.engagementName,
       "Engagement Type":    (l) => l.engagementType,
       "Client SPOC":        (l) => l.clientSpoc,
@@ -475,9 +481,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
               </div>
 
               {[
+                { label: "Client Name", key: "accountName", required: true },
+                { label: "Program Name", key: "programName", tooltip: "The overall program or initiative this engagement falls under" },
                 { label: "Project Name", key: "projectId" },
-                { label: "Account Name", key: "accountName", required: true },
-                { label: "Engagement Name", key: "engagementName", tooltip: "Name of the specific project or engagement with this client" },
+                { label: "Engagement Name", key: "engagementName", tooltip: "Name of the specific engagement within the project" },
                 { label: "Engagement Type", key: "engagementType", tooltip: "e.g. M&S Project, Consulting, Support, Implementation", isEngagementType: true },
               ].map(({ label, key, placeholder, required, tooltip, isEngagementType }: any) => (
                 <div key={key} style={S.formField}>
@@ -519,7 +526,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
               <div style={S.formGrid}>
                 {[
                   { label: "Name", key: "clientSpoc" },
-                  { label: "Position", key: "clientSpocPosition" },
+                  { label: "Designation", key: "clientSpocPosition" },
                   { label: "Email", key: "clientEmail" },
                   { label: "Phone", key: "clientPhone" },
                 ].map(({ label, key }) => (
@@ -545,7 +552,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
               <div style={S.formGrid}>
                 {[
                   { label: "Name", key: "partnerSpoc" },
-                  { label: "Position", key: "partnerSpocPosition" },
+                  { label: "Designation", key: "partnerSpocPosition" },
                   { label: "Email", key: "partnerEmail" },
                   { label: "Phone", key: "partnerPhone" },
                 ].map(({ label, key }) => (
@@ -590,11 +597,28 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Lead Date","Project Name","Account Name","Engagement Name","Engagement Type",
+                {(["Lead Date","Client Name","Program Name","Project Name","Engagement Name","Engagement Type",
                   "Client SPOC","Client Designation","Client Email","Client Phone",
                   "Partner SPOC","Partner Designation","Partner Email","Partner Phone",
                   "Status","Remarks"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map((h) => (
-                  <th key={h} style={S.th}>{h}</th>
+                  <th key={h} style={h === "Actions" ? S.thSticky : S.th}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      {h}
+                      {({
+                        "Program Name": "The overall program or initiative this engagement falls under",
+                        "Engagement Name": "Name of the specific engagement within the project",
+                        "Engagement Type": "e.g. Development, M&S, Consulting, Support, Implementation",
+                        "Client Designation": "Job title or designation of the client SPOC",
+                        "Partner Designation": "Job title or designation of the partner SPOC",
+                      } as Record<string,string>)[h] && <Tooltip text={({
+                        "Program Name": "The overall program or initiative this engagement falls under",
+                        "Engagement Name": "Name of the specific engagement within the project",
+                        "Engagement Type": "e.g. Development, M&S, Consulting, Support, Implementation",
+                        "Client Designation": "Job title or designation of the client SPOC",
+                        "Partner Designation": "Job title or designation of the partner SPOC",
+                      } as Record<string,string>)[h]} />}
+                    </span>
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -611,8 +635,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
                   {visibleCols["Lead Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{lead.leadDate || "-"}</td>}
+                  {visibleCols["Client Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 140 }}>{lead.accountName}</td>}
+                  {visibleCols["Program Name"] && <td style={{ ...S.td, minWidth: 140 }}>{(lead as any).programName || "-"}</td>}
                   {visibleCols["Project Name"] && <td style={S.td}>{lead.projectId}</td>}
-                  {visibleCols["Account Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 140 }}>{lead.accountName}</td>}
                   {visibleCols["Engagement Name"] && <td style={{ ...S.td, minWidth: 160 }}>{lead.engagementName}</td>}
                   {visibleCols["Engagement Type"] && <td style={S.td}>{lead.engagementType}</td>}
                   {visibleCols["Client SPOC"] && <td style={S.td}>{lead.clientSpoc}</td>}
@@ -638,10 +663,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   </td>}
 
                   {/* Actions */}
-                  <td style={S.td}>
+                  <td style={S.tdSticky}>
                     <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
                       <button onClick={() => startEdit(lead)} style={S.editBtn}>Edit</button>
-                      <button onClick={() => onNavigate("transactions", lead.leadId)} style={S.txnBtn}>Txns</button>
+                      <button onClick={() => onNavigate("transactions", lead.leadId)} style={S.txnBtn}>Act</button>
                       <button onClick={() => deleteLead(lead)} style={S.deleteBtn}>Delete</button>
                     </div>
                   </td>
@@ -667,7 +692,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             </div>
 
             {[
-              { title: "Lead Info", cols: ["Lead Date", "Project Name", "Account Name", "Engagement Name", "Engagement Type", "Status", "Remarks"] },
+              { title: "Lead Info", cols: ["Lead Date", "Client Name", "Program Name", "Project Name", "Engagement Name", "Engagement Type", "Status", "Remarks"] },
               { title: "Client SPOC", cols: ["Client SPOC", "Client Designation", "Client Email", "Client Phone"] },
               { title: "Partner SPOC", cols: ["Partner SPOC", "Partner Designation", "Partner Email", "Partner Phone"] },
             ].map(({ title, cols }) => (
@@ -937,6 +962,32 @@ const S: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #e2e8f0",
     position: "sticky",
     top: 0,
+  },
+  thSticky: {
+    padding: "12px 14px",
+    textAlign: "left",
+    background: "#f8fafc",
+    color: "#475569",
+    fontWeight: 700,
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    borderBottom: "1px solid #e2e8f0",
+    position: "sticky",
+    top: 0,
+    right: 0,
+    zIndex: 3,
+    boxShadow: "-2px 0 6px rgba(0,0,0,0.06)",
+  },
+  tdSticky: {
+    padding: "11px 14px",
+    color: "#334155",
+    verticalAlign: "top",
+    fontSize: 13,
+    position: "sticky",
+    right: 0,
+    background: "#ffffff",
+    zIndex: 1,
+    boxShadow: "-2px 0 6px rgba(0,0,0,0.06)",
   },
   tr: {
     borderBottom: "1px solid #f1f5f9",
