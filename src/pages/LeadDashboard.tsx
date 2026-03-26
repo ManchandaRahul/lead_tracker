@@ -738,7 +738,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           title="Delete Lead"
           itemName={`${deleteModal.lead.leadId} — ${deleteModal.lead.accountName}`}
           warning={deleteModal.txnCount > 0
-            ? `This lead has ${deleteModal.txnCount} transaction${deleteModal.txnCount > 1 ? "s" : ""}. Please delete them first before deleting this lead.`
+            ? `This lead has ${deleteModal.txnCount} activity${deleteModal.txnCount > 1 ? "s" : ""}. Please delete them first before deleting this lead.`
             : undefined}
           onConfirm={confirmDeleteLead}
           onCancel={() => setDeleteModal(null)}
