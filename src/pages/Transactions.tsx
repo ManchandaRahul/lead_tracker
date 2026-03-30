@@ -9,9 +9,10 @@ import DeleteModal from "../components/DeleteModal";
 
 type Page = "leads" | "transactions" | "activity";
 
-const STAGES = ["Kickoff", "In Progress", "On Hold", "Review", "Completed"];
+const STAGES = ["Initial Call", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
 
 const STAGE_COLORS: Record<string, { bg: string; color: string }> = {
+  "Initial Call": { bg: "#f0fdf4", color: "#15803d" },
   "Kickoff":     { bg: "#dbeafe", color: "#1d4ed8" },
   "In Progress": { bg: "#fef9c3", color: "#b45309" },
   "On Hold":     { bg: "#f3f4f6", color: "#374151" },
@@ -141,7 +142,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
 
   const downloadExcel = () => {
     const allCols: Record<string, (a: Activity) => any> = {
-      "Client Name":  (a) => a.accountName,
+      "Client Name":   (a) => a.accountName,
       "Activity Name": (a) => a.activityName,
       "Date":          (a) => a.activityDate,
       "Stage":         (a) => a.stage,
@@ -251,7 +252,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
                   {leads.map(l => <option key={l.leadId} value={l.leadId}>{l.leadId} — {l.accountName}</option>)}
                 </select>
               </div>
-              {/* Account Name - read only */}
+              {/* Client Name - read only */}
               <div style={S.formField}>
                 <label style={S.fLabel}>Client Name</label>
                 <input style={{ ...S.fInput, background: "#f1f5f9" }} value={formData.accountName} readOnly />
@@ -306,7 +307,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
             <thead>
               <tr>
                 {(["Client Name", "Activity Name", "Date", "Stage", "Handled By", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
-                  <th key={h} style={S.th}>{h}</th>
+                  <th key={h} style={h === "Actions" ? S.thSticky : S.th}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -332,7 +333,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
                   {visibleCols["Notes"] && <td style={{ ...S.td, minWidth: 200, maxWidth: 260, whiteSpace: "pre-wrap", color: "#64748b", fontSize: 12 }}>
                     {a.notes || <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No notes</span>}
                   </td>}
-                  <td style={S.td}>
+                  <td style={S.tdSticky}>
                     <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
                       <button onClick={() => startEdit(a)} style={S.editBtn}>Edit</button>
                       <button onClick={() => deleteActivity(a)} style={S.deleteBtn}>Delete</button>
@@ -440,6 +441,8 @@ const S: Record<string, React.CSSProperties> = {
   tableWrap: { overflowX: "auto", borderRadius: 12, border: "1px solid #e2e8f0", background: "#fff", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
   th: { padding: "12px 14px", textAlign: "left", background: "#f8fafc", color: "#475569", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0 },
+  thSticky: { padding: "12px 14px", textAlign: "left", background: "#f8fafc", color: "#475569", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0, right: 0, zIndex: 3, boxShadow: "-2px 0 6px rgba(0,0,0,0.06)" },
+  tdSticky: { padding: "11px 14px", color: "#334155", verticalAlign: "top", fontSize: 13, position: "sticky", right: 0, background: "#ffffff", zIndex: 1, boxShadow: "-2px 0 6px rgba(0,0,0,0.06)" },
   tr: { borderBottom: "1px solid #f1f5f9", transition: "background 0.15s" },
   td: { padding: "11px 14px", color: "#334155", verticalAlign: "top", fontSize: 13 },
   editBtn: { padding: "5px 10px", background: "#eff6ff", color: "#2563eb", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 12 },
