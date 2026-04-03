@@ -20,6 +20,8 @@ const STAGE_COLORS: Record<string, { bg: string; color: string }> = {
   "Completed":   { bg: "#dcfce7", color: "#16a34a" },
 };
 
+const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
+
 const EMPTY_ACTIVITY = {
   transactionId: "",   // kept internally for Firebase linking
   leadId: "",
@@ -29,6 +31,12 @@ const EMPTY_ACTIVITY = {
   stage: "Kickoff",
   handledBy: "",
   notes: "",
+  // ── Deal fields (only used when isDeal = true) ──
+  isDeal: false,
+  dealValue: "",
+  dealCurrency: "INR",
+  dueDate: "",
+  probability: "",
 };
 
 type Activity = typeof EMPTY_ACTIVITY & { id: string; createdAt?: string };
@@ -55,7 +63,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
   const [deleteModal, setDeleteModal] = useState<{ activity: Activity } | null>(null);
   const [showColModal, setShowColModal] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
-    "Client Name": true,
+    "Account Name": true,
     "Activity Name": true,
     "Date": true,
     "Stage": true,
@@ -142,7 +150,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
 
   const downloadExcel = () => {
     const allCols: Record<string, (a: Activity) => any> = {
-      "Client Name":   (a) => a.accountName,
+      "Account Name":  (a) => a.accountName,
       "Activity Name": (a) => a.activityName,
       "Date":          (a) => a.activityDate,
       "Stage":         (a) => a.stage,
@@ -252,9 +260,9 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
                   {leads.map(l => <option key={l.leadId} value={l.leadId}>{l.leadId} — {l.accountName}</option>)}
                 </select>
               </div>
-              {/* Client Name - read only */}
+              {/* Account Name - read only */}
               <div style={S.formField}>
-                <label style={S.fLabel}>Client Name</label>
+                <label style={S.fLabel}>Account Name</label>
                 <input style={{ ...S.fInput, background: "#f1f5f9" }} value={formData.accountName} readOnly />
               </div>
               {/* Activity Name */}
@@ -292,6 +300,88 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
               <textarea rows={3} style={{ ...S.fInput, resize: "vertical" }} value={formData.notes}
                 onChange={e => setFormData({ ...formData, notes: e.target.value })} />
             </div>
+
+            {/* ── Deal Toggle ── */}
+            <div style={{ padding: "0 24px 16px" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
+                <div
+                  onClick={() => setFormData({ ...formData, isDeal: !(formData as any).isDeal })}
+                  style={{
+                    width: 40, height: 22, borderRadius: 11, cursor: "pointer", transition: "background 0.2s",
+                    background: (formData as any).isDeal ? "#0f172a" : "#e2e8f0",
+                    position: "relative", flexShrink: 0,
+                  }}
+                >
+                  <div style={{
+                    position: "absolute", top: 3, left: (formData as any).isDeal ? 21 : 3,
+                    width: 16, height: 16, borderRadius: "50%", background: "#fff",
+                    transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                  }} />
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#334155" }}>
+                  This activity is a Deal
+                </span>
+                {(formData as any).isDeal && (
+                  <span style={{ fontSize: 11, background: "#ede9fe", color: "#7c3aed", padding: "2px 8px", borderRadius: 20, fontWeight: 600 }}>
+                    Deal Mode ON
+                  </span>
+                )}
+              </label>
+            </div>
+
+            {/* ── Deal Fields (visible only when isDeal = true) ── */}
+            {(formData as any).isDeal && (
+              <div style={{ margin: "0 24px 20px", padding: "16px 20px", background: "#f8faff", borderRadius: 10, border: "1.5px solid #e0e7ff" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 14 }}>
+                  Deal Details
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "16px 20px" }}>
+                  {/* Deal Value + Currency */}
+                  <div style={S.formField}>
+                    <label style={S.fLabel}>Deal Value</label>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <select
+                        style={{ ...S.fInput, width: 80, flexShrink: 0 }}
+                        value={(formData as any).dealCurrency || "INR"}
+                        onChange={e => setFormData({ ...formData, dealCurrency: e.target.value } as any)}
+                      >
+                        {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+                      </select>
+                      <input
+                        type="number"
+                        style={{ ...S.fInput, flex: 1 }}
+                        placeholder="0.00"
+                        value={(formData as any).dealValue || ""}
+                        onChange={e => setFormData({ ...formData, dealValue: e.target.value } as any)}
+                      />
+                    </div>
+                  </div>
+                  {/* Due Date */}
+                  <div style={S.formField}>
+                    <label style={S.fLabel}>Due Date</label>
+                    <input
+                      type="date"
+                      style={S.fInput}
+                      value={(formData as any).dueDate || ""}
+                      onChange={e => setFormData({ ...formData, dueDate: e.target.value } as any)}
+                    />
+                  </div>
+                  {/* Probability */}
+                  <div style={S.formField}>
+                    <label style={S.fLabel}>Probability (%)</label>
+                    <input
+                      type="number"
+                      min="0" max="100"
+                      style={S.fInput}
+                      placeholder="e.g. 75"
+                      value={(formData as any).probability || ""}
+                      onChange={e => setFormData({ ...formData, probability: e.target.value } as any)}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div style={{ padding: "0 24px 24px", display: "flex", gap: 10 }}>
               <button type="submit" style={S.btnPrimary}>{editingId ? "Save Changes" : "Add Activity"}</button>
               <button type="button" onClick={resetForm} style={S.btnOutline}>Cancel</button>
@@ -306,7 +396,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Client Name", "Activity Name", "Date", "Stage", "Handled By", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
+                {(["Account Name", "Activity Name", "Date", "Stage", "Handled By", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
                   <th key={h} style={h === "Actions" ? S.thSticky : S.th}>{h}</th>
                 ))}
               </tr>
@@ -321,7 +411,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
                 <tr key={a.id} style={S.tr}
                   onMouseEnter={e => (e.currentTarget.style.background = "#f8fafc")}
                   onMouseLeave={e => (e.currentTarget.style.background = "")}>
-                  {visibleCols["Client Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 140 }}>{a.accountName}</td>}
+                  {visibleCols["Account Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 140 }}>{a.accountName}</td>}
                   {visibleCols["Activity Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 160 }}>{a.activityName}</td>}
                   {visibleCols["Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{a.activityDate || "-"}</td>}
                   {visibleCols["Stage"] && <td style={S.td}>
@@ -332,6 +422,19 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
                   {visibleCols["Handled By"] && <td style={S.td}>{a.handledBy || "-"}</td>}
                   {visibleCols["Notes"] && <td style={{ ...S.td, minWidth: 200, maxWidth: 260, whiteSpace: "pre-wrap", color: "#64748b", fontSize: 12 }}>
                     {a.notes || <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No notes</span>}
+                  </td>}
+                  {visibleCols["Deal Value"] && <td style={S.td}>
+                    {(a as any).isDeal && (a as any).dealValue
+                      ? <span style={{ fontWeight: 600, color: "#7c3aed" }}>{(a as any).dealCurrency || "INR"} {parseFloat((a as any).dealValue).toLocaleString("en-IN")}</span>
+                      : <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>-</span>}
+                  </td>}
+                  {visibleCols["Due Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>
+                    {(a as any).isDeal && (a as any).dueDate ? (a as any).dueDate : "-"}
+                  </td>}
+                  {visibleCols["Probability"] && <td style={{ ...S.td, textAlign: "center" }}>
+                    {(a as any).isDeal && (a as any).probability
+                      ? <span style={{ fontWeight: 600, color: "#0f172a" }}>{(a as any).probability}%</span>
+                      : "-"}
                   </td>}
                   <td style={S.tdSticky}>
                     <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
@@ -360,6 +463,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
 
             {[
               { title: "Activity Info", cols: ["Client Name", "Activity Name", "Date", "Stage", "Handled By", "Notes"] },
+              { title: "Deal Info (shown when Deal Mode is ON)", cols: ["Deal Value", "Due Date", "Probability"] },
             ].map(({ title, cols }) => (
               <div key={title} style={{ marginBottom: 20 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid #f1f5f9" }}>
