@@ -47,9 +47,9 @@ export default function Login() {
 
     try {
       const trimmedUsername = username.trim();
-      const trimmedPassword = password.trim();
+      const rawPassword = password;
 
-      if (!trimmedUsername || !trimmedPassword) {
+      if (!trimmedUsername || !rawPassword) {
         setError("Please enter username and password.");
         setLoading(false);
         return;
@@ -93,7 +93,7 @@ export default function Login() {
         return;
       }
 
-      await signInWithEmailAndPassword(auth, match.email, trimmedPassword);
+      await signInWithEmailAndPassword(auth, match.email, rawPassword);
 
       localStorage.setItem("leadUser", JSON.stringify({
         username: match.username,

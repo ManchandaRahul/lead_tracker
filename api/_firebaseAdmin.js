@@ -1,5 +1,13 @@
 import admin from "firebase-admin";
 import fs from "node:fs";
+import { Buffer } from "node:buffer";
+
+let adminInitMetadata = {
+  source: "unknown",
+  projectId: "",
+  clientEmail: "",
+  keyId: "",
+};
 
 function normalizeQuotedValue(rawValue) {
   if (!rawValue) return "";
@@ -40,6 +48,33 @@ function parseServiceAccountFromEnv() {
   };
 }
 
+function parseServiceAccountFromJsonEnv() {
+  const rawJson = normalizeQuotedValue(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+  const rawBase64 = normalizeQuotedValue(process.env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64);
+
+  let parsed;
+  if (rawJson) {
+    parsed = JSON.parse(rawJson);
+  } else if (rawBase64) {
+    const decoded = Buffer.from(rawBase64, "base64").toString("utf8");
+    parsed = JSON.parse(decoded);
+  } else {
+    return null;
+  }
+
+  if (!parsed?.project_id || !parsed?.client_email || !parsed?.private_key) {
+    throw new Error(
+      "FIREBASE_SERVICE_ACCOUNT_JSON(_BASE64) is missing project_id/client_email/private_key."
+    );
+  }
+
+  return {
+    projectId: parsed.project_id,
+    clientEmail: parsed.client_email,
+    privateKey: parsed.private_key,
+  };
+}
+
 export function getAdminApp() {
   if (admin.apps.length) return admin.app();
 
@@ -59,6 +94,13 @@ export function getAdminApp() {
       throw new Error("Service account JSON is missing project_id/client_email/private_key.");
     }
 
+    adminInitMetadata = {
+      source: "google_application_credentials",
+      projectId: parsed.project_id || "",
+      clientEmail: parsed.client_email || "",
+      keyId: parsed.private_key_id || "",
+    };
+
     console.log("[firebase-admin] init via GOOGLE_APPLICATION_CREDENTIALS", {
       projectId: parsed.project_id,
       clientEmail: parsed.client_email,
@@ -75,7 +117,30 @@ export function getAdminApp() {
   }
 
   try {
+    const jsonServiceAccount = parseServiceAccountFromJsonEnv();
+    if (jsonServiceAccount) {
+      adminInitMetadata = {
+        source: "firebase_service_account_json",
+        projectId: jsonServiceAccount.projectId,
+        clientEmail: jsonServiceAccount.clientEmail,
+        keyId: "",
+      };
+      console.log("[firebase-admin] init via FIREBASE_SERVICE_ACCOUNT_JSON(_BASE64)", {
+        projectId: jsonServiceAccount.projectId,
+        clientEmail: jsonServiceAccount.clientEmail,
+      });
+      return admin.initializeApp({
+        credential: admin.credential.cert(jsonServiceAccount),
+      });
+    }
+
     const serviceAccount = parseServiceAccountFromEnv();
+    adminInitMetadata = {
+      source: "firebase_split_env",
+      projectId: serviceAccount.projectId,
+      clientEmail: serviceAccount.clientEmail,
+      keyId: "",
+    };
     console.log("[firebase-admin] init via FIREBASE_* env", {
       projectId: serviceAccount.projectId,
       clientEmail: serviceAccount.clientEmail,
@@ -86,4 +151,8 @@ export function getAdminApp() {
   } catch (envError) {
     throw envError;
   }
+}
+
+export function getAdminInitMetadata() {
+  return adminInitMetadata;
 }
