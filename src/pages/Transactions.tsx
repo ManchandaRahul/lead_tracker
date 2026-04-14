@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, Fragment } from "react";
 import { db } from "../firebase/config";
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { logActivity } from "../firebase/activityLog";
@@ -7,7 +7,7 @@ import { auth } from "../firebase/config";
 import * as XLSX from "xlsx";
 import DeleteModal from "../components/DeleteModal";
 
-type Page = "leads" | "transactions" | "activity";
+type Page = "leads" | "transactions" | "activity" | "users";
 
 const STAGES = ["Initial Call", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
 
@@ -23,7 +23,7 @@ const STAGE_COLORS: Record<string, { bg: string; color: string }> = {
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
 
 const EMPTY_ACTIVITY = {
-  transactionId: "",   // kept internally for Firebase linking
+  transactionId: "",
   leadId: "",
   accountName: "",
   activityName: "",
@@ -31,12 +31,14 @@ const EMPTY_ACTIVITY = {
   stage: "Kickoff",
   handledBy: "",
   notes: "",
-  // ── Deal fields (only used when isDeal = true) ──
   isDeal: false,
   dealValue: "",
   dealCurrency: "INR",
   dueDate: "",
   probability: "",
+  wonDate: "",
+  wonTime: "",
+  actions: [] as any[],
 };
 
 type Activity = typeof EMPTY_ACTIVITY & { id: string; createdAt?: string };
@@ -46,6 +48,15 @@ function generateActivityId() {
   const d = new Date();
   return `ACT_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"00")}${String(d.getDate()).padStart(2,"00")}_${Math.floor(Math.random()*9000+1000)}`;
 }
+
+const DEAL_PIPELINE_STAGES = [
+  { id: "10", label: "Qualified", percent: "10%" },
+  { id: "20", label: "Meeting ar...", percent: "20%" },
+  { id: "40", label: "Needs defi...", percent: "40%" },
+  { id: "60", label: "Proposal s...", percent: "60%" },
+  { id: "80", label: "Negotiation", percent: "80%" },
+  { id: "100", label: "Won", percent: "100%" },
+];
 
 export default function Transactions({ onNavigate, filterLeadId }: { onNavigate: (p: Page, leadId?: string) => void; filterLeadId?: string | null }) {
   const user    = JSON.parse(localStorage.getItem("leadUser")!);
@@ -70,6 +81,20 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
     "Handled By": true,
     "Notes": true,
   });
+
+  const [showLostModal, setShowLostModal] = useState(false);
+  const [selectedLostReason, setSelectedLostReason] = useState("");
+  const [actionDeleteModal, setActionDeleteModal] = useState<{ index: number; action: any } | null>(null);
+  const [deletedActionLogs, setDeletedActionLogs] = useState<
+    { action: any; reason: string; deletedAt: string }[]
+  >([]);
+
+  // Inline Action States
+  const [activeAction, setActiveAction] = useState<"Note" | "Call" | "Meeting" | null>(null);
+  const [actionTime, setActionTime] = useState("11:31");
+  const [meetingPlace, setMeetingPlace] = useState("");
+  const [actionDescription, setActionDescription] = useState("");
+  const [actionDate, setActionDate] = useState(new Date().toISOString().slice(0, 10));
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, "transactions"), (snap) => {
@@ -103,6 +128,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const deletedActionsToLog = [...deletedActionLogs];
     const payload = {
       ...formData,
       transactionId: formData.transactionId || generateActivityId(),
@@ -116,6 +142,21 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
         description: `Activity "${payload.activityName}" for "${payload.accountName}" was edited`,
         actionBy: user.username, timestamp: new Date().toISOString(),
       });
+      for (const deletedAction of deletedActionsToLog) {
+        const actionLabel = [
+          deletedAction.action.type,
+          deletedAction.action.date,
+          deletedAction.action.time ? `at ${deletedAction.action.time}` : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        await logActivity(payload.transactionId, payload.accountName, "transactions", {
+          actionType: "TXN_EDITED",
+          description: `Action "${actionLabel}" was deleted from activity "${payload.activityName}". Reason: ${deletedAction.reason}`,
+          actionBy: user.username,
+          timestamp: deletedAction.deletedAt,
+        });
+      }
     } else {
       await addDoc(collection(db, "transactions"), { ...payload, createdAt: new Date().toISOString() });
       await logActivity(payload.transactionId, payload.accountName, "transactions", {
@@ -127,14 +168,45 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
     resetForm();
   };
 
-  const resetForm = () => { setFormData({ ...EMPTY_ACTIVITY }); setEditingId(null); setShowForm(false); };
+  const resetForm = () => { 
+    setFormData({ ...EMPTY_ACTIVITY }); 
+    setEditingId(null); 
+    setShowForm(false); 
+    setShowLostModal(false);
+    setSelectedLostReason("");
+    setActionDeleteModal(null);
+    setDeletedActionLogs([]);
+    setActiveAction(null);           // Close any open action section
+    setActionDescription("");
+    setMeetingPlace("");
+  };
 
   const startEdit = (a: Activity) => {
-    setFormData({ ...a }); setEditingId(a.id); setShowForm(true);
+    setFormData({ ...a }); 
+    setActionDeleteModal(null);
+    setDeletedActionLogs([]);
+    setEditingId(a.id); 
+    setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const deleteActivity = (a: Activity) => setDeleteModal({ activity: a });
+
+  const confirmDeleteAction = (reason: string) => {
+    if (!actionDeleteModal) return;
+    const updated = [...(formData.actions || [])];
+    updated.splice(actionDeleteModal.index, 1);
+    setFormData(prev => ({ ...prev, actions: updated }));
+    setDeletedActionLogs(prev => [
+      ...prev,
+      {
+        action: actionDeleteModal.action,
+        reason,
+        deletedAt: new Date().toISOString(),
+      },
+    ]);
+    setActionDeleteModal(null);
+  };
 
   const confirmDelete = async (reason: string) => {
     if (!deleteModal) return;
@@ -146,6 +218,50 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
     });
     await deleteDoc(doc(db, "transactions", activity.id));
     setDeleteModal(null);
+  };
+
+  const handleSaveLostReason = () => {
+    if (!selectedLostReason) return;
+    const reasonText = `Lost - Reason: ${selectedLostReason}`;
+    setFormData(prev => ({
+      ...prev,
+      probability: "0",
+      notes: prev.notes ? `${prev.notes}\n${reasonText}` : reasonText
+    }));
+    setShowLostModal(false);
+    setSelectedLostReason("");
+  };
+
+  // Open inline action section
+  const openAction = (type: "Note" | "Call" | "Meeting") => {
+    setActiveAction(type);
+    setActionDescription("");
+    setMeetingPlace("");
+  };
+
+
+  // Save inline action as structured record
+  const saveAction = () => {
+    if (!activeAction) return;
+
+    const newAction = {
+      type: activeAction,
+      time: actionTime,
+      place: meetingPlace || "",
+      description: actionDescription || "",
+      date: actionDate,
+      timestamp: new Date().toISOString()
+    };
+
+    setFormData(prev => ({
+      ...prev,
+      actions: [...(prev.actions || []), newAction],
+      notes: prev.notes ? `${prev.notes}\n[${activeAction}] ${actionDescription || ""}` : `[${activeAction}] ${actionDescription || ""}`
+    }));
+
+    setActiveAction(null);
+    setActionDescription("");
+    setMeetingPlace("");
   };
 
   const downloadExcel = () => {
@@ -185,7 +301,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
 
   return (
     <div style={S.page}>
-      {/* ── Header ── */}
+      {/* Header, filter, stats - unchanged */}
       <div style={S.header}>
         <div style={S.headerLeft}>
           <img src="/k1.svg" alt="Karuyaki Logo" style={{ height: 36 }} />
@@ -195,39 +311,39 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
           <button onClick={() => onNavigate("leads")} style={S.navTab}>Leads</button>
           <button onClick={() => onNavigate("transactions")} style={{ ...S.navTab, ...S.navTabActive }}>Activities</button>
           {isAdmin && <button onClick={() => onNavigate("activity")} style={S.navTab}>Activity Log</button>}
+          {isAdmin && <button onClick={() => onNavigate("users")} style={S.navTab}>Users</button>}
         </div>
         <div style={S.headerRight}>
-          <input
-            placeholder="Search activities…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={S.searchInput}
-          />
+          <input placeholder="Search activities…" value={search} onChange={e => setSearch(e.target.value)} style={S.searchInput} />
           <select value={stageFilter} onChange={e => setStageFilter(e.target.value)} style={S.select}>
             <option value="All">All Stages</option>
             {STAGES.map(s => <option key={s}>{s}</option>)}
           </select>
           <button onClick={downloadExcel} style={S.btnDark}>Export Excel</button>
-          {/* ── Column selector ── */}
           <button onClick={() => setShowColModal(true)} style={S.btnOutline}>Columns</button>
-          <button onClick={() => { setShowForm(true); setEditingId(null); setFormData({...EMPTY_ACTIVITY}); }} style={S.btnPrimary}>
-            + Add Activity
-          </button>
+<button 
+  onClick={() => { 
+    setShowForm(true); 
+    setActionDeleteModal(null);
+    setDeletedActionLogs([]);
+    setEditingId(null); 
+    setFormData({ ...EMPTY_ACTIVITY }); 
+  }} 
+  style={S.btnPrimary}
+>
+  + Add Activity
+</button>
         </div>
         <button onClick={logout} style={S.btnLogout}>Logout</button>
       </div>
 
-      {/* ── Active lead filter banner ── */}
       {filterLeadId && (
         <div style={{ padding: "8px 24px", background: "#eff6ff", borderBottom: "1px solid #bfdbfe", fontSize: 13, color: "#1d4ed8", display: "flex", alignItems: "center", gap: 10 }}>
           Showing activities for lead: <b>{filterLeadId}</b>
-          <button onClick={() => setSearch("")} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "#dc2626", fontWeight: 700, fontSize: 13 }}>
-            ✕ Show all
-          </button>
+          <button onClick={() => setSearch("")} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "#dc2626", fontWeight: 700, fontSize: 13 }}>✕ Show all</button>
         </div>
       )}
 
-      {/* ── Stats bar ── */}
       <div style={S.statsBar}>
         <div style={S.statTotal}>
           <span style={S.statNum}>{activities.length}</span>
@@ -242,7 +358,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
         ))}
       </div>
 
-      {/* ── Add/Edit Form ── */}
+      {/* Form */}
       {showForm && (
         <div style={S.formCard}>
           <div style={S.formHeader}>
@@ -250,137 +366,349 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
             <button onClick={resetForm} style={S.closeBtn}>✕</button>
           </div>
           <form onSubmit={handleSubmit}>
+            {/* Original fields unchanged */}
             <div style={S.formGrid}>
-              {/* Lead selector */}
               <div style={S.formField}>
                 <label style={S.fLabel}>Link to Lead *</label>
-                <select style={S.fInput} value={formData.leadId} required
-                  onChange={e => handleLeadSelect(e.target.value)}>
+                <select style={S.fInput} value={formData.leadId} required onChange={e => handleLeadSelect(e.target.value)}>
                   <option value="">Select a Lead</option>
                   {leads.map(l => <option key={l.leadId} value={l.leadId}>{l.leadId} — {l.accountName}</option>)}
                 </select>
               </div>
-              {/* Account Name - read only */}
               <div style={S.formField}>
                 <label style={S.fLabel}>Account Name</label>
                 <input style={{ ...S.fInput, background: "#f1f5f9" }} value={formData.accountName} readOnly />
               </div>
-              {/* Activity Name */}
               <div style={S.formField}>
                 <label style={S.fLabel}>Activity Name *</label>
-                <input style={S.fInput} required placeholder="e.g. Discovery Call, Proposal Sent…"
-                  value={formData.activityName}
-                  onChange={e => setFormData({ ...formData, activityName: e.target.value })} />
+                <input style={S.fInput} required placeholder="e.g. Discovery Call, Proposal Sent…" value={formData.activityName} onChange={e => setFormData({ ...formData, activityName: e.target.value })} />
               </div>
-              {/* Date */}
               <div style={S.formField}>
                 <label style={S.fLabel}>Date</label>
-                <input type="date" style={S.fInput}
-                  value={formData.activityDate || new Date().toISOString().slice(0, 10)}
-                  onChange={e => setFormData({ ...formData, activityDate: e.target.value })} />
+                <input type="date" style={S.fInput} value={formData.activityDate || new Date().toISOString().slice(0, 10)} onChange={e => setFormData({ ...formData, activityDate: e.target.value })} />
               </div>
-              {/* Stage */}
               <div style={S.formField}>
                 <label style={S.fLabel}>Stage</label>
-                <select style={S.fInput} value={formData.stage}
-                  onChange={e => setFormData({ ...formData, stage: e.target.value })}>
+                <select style={S.fInput} value={formData.stage} onChange={e => setFormData({ ...formData, stage: e.target.value })}>
                   {STAGES.map(s => <option key={s}>{s}</option>)}
                 </select>
               </div>
-              {/* Handled By */}
               <div style={S.formField}>
                 <label style={S.fLabel}>Handled By</label>
-                <input style={S.fInput} value={formData.handledBy}
-                  onChange={e => setFormData({ ...formData, handledBy: e.target.value })} />
+                <input style={S.fInput} value={formData.handledBy} onChange={e => setFormData({ ...formData, handledBy: e.target.value })} />
               </div>
             </div>
-            {/* Notes */}
+
             <div style={{ padding: "0 24px 20px" }}>
               <label style={S.fLabel}>Notes</label>
-              <textarea rows={3} style={{ ...S.fInput, resize: "vertical" }} value={formData.notes}
-                onChange={e => setFormData({ ...formData, notes: e.target.value })} />
+              <textarea rows={3} style={{ ...S.fInput, resize: "vertical" }} value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} />
             </div>
 
-            {/* ── Deal Toggle ── */}
+            {/* Deal Section - unchanged */}
             <div style={{ padding: "0 24px 16px" }}>
               <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
-                <div
-                  onClick={() => setFormData({ ...formData, isDeal: !(formData as any).isDeal })}
-                  style={{
-                    width: 40, height: 22, borderRadius: 11, cursor: "pointer", transition: "background 0.2s",
-                    background: (formData as any).isDeal ? "#0f172a" : "#e2e8f0",
-                    position: "relative", flexShrink: 0,
-                  }}
-                >
-                  <div style={{
-                    position: "absolute", top: 3, left: (formData as any).isDeal ? 21 : 3,
-                    width: 16, height: 16, borderRadius: "50%", background: "#fff",
-                    transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                  }} />
+                <div onClick={() => setFormData({ ...formData, isDeal: !formData.isDeal })} style={{ width: 40, height: 22, borderRadius: 11, cursor: "pointer", transition: "background 0.2s", background: formData.isDeal ? "#0f172a" : "#e2e8f0", position: "relative" }}>
+                  <div style={{ position: "absolute", top: 3, left: formData.isDeal ? 21 : 3, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s" }} />
                 </div>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#334155" }}>
-                  This activity is a Deal
-                </span>
-                {(formData as any).isDeal && (
-                  <span style={{ fontSize: 11, background: "#ede9fe", color: "#7c3aed", padding: "2px 8px", borderRadius: 20, fontWeight: 600 }}>
-                    Deal Mode ON
-                  </span>
-                )}
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#334155" }}>This activity is a Deal</span>
+                {formData.isDeal && <span style={{ fontSize: 11, background: "#ede9fe", color: "#7c3aed", padding: "2px 8px", borderRadius: 20, fontWeight: 600 }}>Deal Mode ON</span>}
               </label>
             </div>
 
-            {/* ── Deal Fields (visible only when isDeal = true) ── */}
-            {(formData as any).isDeal && (
+
+
+                        {formData.isDeal && (
               <div style={{ margin: "0 24px 20px", padding: "16px 20px", background: "#f8faff", borderRadius: 10, border: "1.5px solid #e0e7ff" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 14 }}>
-                  Deal Details
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "16px 20px" }}>
-                  {/* Deal Value + Currency */}
-                  <div style={S.formField}>
-                    <label style={S.fLabel}>Deal Value</label>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <select
-                        style={{ ...S.fInput, width: 80, flexShrink: 0 }}
-                        value={(formData as any).dealCurrency || "INR"}
-                        onChange={e => setFormData({ ...formData, dealCurrency: e.target.value } as any)}
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 14 }}>Deal Details</div>
+                
+                <div style={{ display: "flex", alignItems: "center", gap: 6, overflowX: "auto", padding: "4px 0", marginBottom: 20 }}>
+                  {DEAL_PIPELINE_STAGES.map((stage, i) => (
+                    <Fragment key={stage.id}>
+                      <div 
+                        onClick={() => setFormData({ ...formData, probability: stage.id })} 
+                        style={{ 
+                          padding: "8px 16px", 
+                          background: formData.probability === stage.id ? (stage.id === "100" ? "#3b82f6" : "#0f172a") : "#fff", 
+                          color: formData.probability === stage.id ? "#fff" : "#0f172a", 
+                          border: formData.probability === stage.id ? "2px solid #0f172a" : "2px solid #ec4899", 
+                          borderRadius: 9999, 
+                          fontSize: 13, 
+                          fontWeight: 600, 
+                          whiteSpace: "nowrap", 
+                          cursor: "pointer", 
+                          display: "flex", 
+                          alignItems: "center", 
+                          gap: 6 
+                        }}
                       >
-                        {CURRENCIES.map(c => <option key={c}>{c}</option>)}
-                      </select>
-                      <input
-                        type="number"
-                        style={{ ...S.fInput, flex: 1 }}
-                        placeholder="0.00"
-                        value={(formData as any).dealValue || ""}
-                        onChange={e => setFormData({ ...formData, dealValue: e.target.value } as any)}
-                      />
+                        <span style={{ fontWeight: 700 }}>{stage.percent}</span>
+                        <span style={{ opacity: 0.6 }}>|</span>
+                        <span>{stage.label}</span>
+                      </div>
+                      {i < DEAL_PIPELINE_STAGES.length - 1 && <span style={{ fontSize: 22, color: "#e2e8f0", lineHeight: 1 }}>→</span>}
+                    </Fragment>
+                  ))}
+                  <div onClick={() => setShowLostModal(true)} style={{ marginLeft: "auto", padding: "8px 20px", background: "#fee2e2", color: "#dc2626", border: "2px solid #fecaca", borderRadius: 9999, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Lost</div>
+                </div>
+
+                                          {/* Proposal Price */}
+                <div style={{ marginBottom: 20 }}>
+                  <label style={S.fLabel}>Proposal Price</label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <select 
+                      value={formData.dealCurrency} 
+                      onChange={e => setFormData({ ...formData, dealCurrency: e.target.value })} 
+                      style={{ ...S.fInput, width: 100 }}
+                    >
+                      {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+                    </select>
+                    <input 
+                      type="number" 
+                      placeholder="0.00" 
+                      value={formData.dealValue || ""} 
+                      onChange={e => setFormData({ ...formData, dealValue: e.target.value })} 
+                      style={S.fInput} 
+                    />
+                  </div>
+                </div>
+
+                {/* Pipeline Price - Weighted Value (Correct Business Logic) */}
+                {formData.dealValue && parseFloat(formData.dealValue) > 0 && 
+                 formData.probability && parseFloat(formData.probability) > 0 && (
+                  <div style={{ marginBottom: 20 }}>
+                    <label style={S.fLabel}>Pipeline Price</label>
+                    <div style={{ 
+                      padding: "10px 12px", 
+                      background: "#f1f5f9", 
+                      borderRadius: 8, 
+                      fontSize: 14, 
+                      fontWeight: 600,
+                      color: "#0f172a",
+                      border: "1.5px solid #e2e8f0"
+                    }}>
+                      {formData.dealCurrency} {' '}
+                      {(parseFloat(formData.dealValue) * (parseFloat(formData.probability) / 100))
+                        .toLocaleString('en-IN', { 
+                          minimumFractionDigits: 2, 
+                          maximumFractionDigits: 2 
+                        })}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                      Calculated as Proposal Price × Confidence Level
                     </div>
                   </div>
-                  {/* Due Date */}
-                  <div style={S.formField}>
-                    <label style={S.fLabel}>Due Date</label>
-                    <input
-                      type="date"
-                      style={S.fInput}
-                      value={(formData as any).dueDate || ""}
-                      onChange={e => setFormData({ ...formData, dueDate: e.target.value } as any)}
-                    />
+                )}
+
+
+                                
+
+                {formData.probability === "100" && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                    <div>
+                      <label style={S.fLabel}>Won Date</label>
+                      <input type="date" value={formData.wonDate} onChange={e => setFormData({ ...formData, wonDate: e.target.value })} style={S.fInput} />
+                    </div>
+                    <div>
+                      <label style={S.fLabel}>Won Time</label>
+                      <input type="time" value={formData.wonTime} onChange={e => setFormData({ ...formData, wonTime: e.target.value })} style={S.fInput} />
+                    </div>
                   </div>
-                  {/* Probability */}
-                  <div style={S.formField}>
-                    <label style={S.fLabel}>Probability (%)</label>
-                    <input
-                      type="number"
-                      min="0" max="100"
-                      style={S.fInput}
-                      placeholder="e.g. 75"
-                      value={(formData as any).probability || ""}
-                      onChange={e => setFormData({ ...formData, probability: e.target.value } as any)}
-                    />
-                  </div>
-                </div>
+                )}
               </div>
             )}
+
+
+            {/* ==================== ACTIONS SECTION (Inline + Timeline) ==================== */}
+            <div style={{ padding: "0 24px 24px", borderTop: "1px solid #e2e8f0" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Actions</h3>
+              </div>
+
+              {/* Quick Buttons */}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
+                <button 
+                  type="button" 
+                  onClick={() => openAction("Note")} 
+                  style={{ padding: "8px 20px", borderRadius: 9999, border: "1px solid #3b82f6", background: "#fff", color: "#3b82f6", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+                >+ Note</button>
+                <button 
+                  type="button" 
+                  onClick={() => openAction("Call")} 
+                  style={{ padding: "8px 20px", borderRadius: 9999, border: "1px solid #3b82f6", background: "#fff", color: "#3b82f6", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+                >+ Call</button>
+                <button 
+                  type="button" 
+                  onClick={() => openAction("Meeting")} 
+                  style={{ padding: "8px 20px", borderRadius: 9999, border: "1px solid #3b82f6", background: "#fff", color: "#3b82f6", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+                >+ Meeting</button>
+              </div>
+
+                            {/* Inline Action Form - appears when button is clicked */}
+              {activeAction && (
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+                  <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
+                  
+                  <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+                    <input 
+                      type="time" 
+                      value={actionTime} 
+                      onChange={e => setActionTime(e.target.value)} 
+                      style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 140 }} 
+                    />
+                    {activeAction === "Meeting" && (
+                      <input 
+                        type="text" 
+                        placeholder="Meeting place" 
+                        value={meetingPlace} 
+                        onChange={e => setMeetingPlace(e.target.value)} 
+                        style={{ flex: 1, padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8 }} 
+                      />
+                    )}
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 8, display: "block" }}>Description (Optional)</label>
+                    <textarea 
+                      value={actionDescription} 
+                      onChange={e => setActionDescription(e.target.value)} 
+                      rows={4} 
+                      style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }} 
+                      placeholder="Add details here..." 
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+                    <button 
+                      type="button"
+                      onClick={() => setActiveAction(null)} 
+                      style={{ padding: "10px 24px", border: "none", background: "transparent", color: "#64748b", fontWeight: 600 }}
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={saveAction} 
+                      style={{ padding: "10px 32px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 9999, fontWeight: 600 }}
+                    >
+                      Save {activeAction}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+
+
+              {/* Timeline of Saved Actions */}
+{/* Timeline of Saved Actions */}
+{formData.actions && formData.actions.length > 0 && (
+  <div style={{ marginTop: 20 }}>
+    <h4 style={{ marginBottom: 12, fontSize: 16, fontWeight: 600 }}>Action History</h4>
+
+    <div style={{ position: "relative", paddingLeft: 28 }}>
+      {/* Vertical line */}
+      <div style={{
+        position: "absolute",
+        left: 12,
+        top: 4,
+        bottom: 4,
+        width: 2,
+        background: "#e2e8f0",
+        borderRadius: 2
+      }} />
+
+      {(formData.actions || []).map((a, idx) => (
+        <div key={idx} style={{
+          position: "relative",
+          display: "flex",
+          gap: 14,
+          marginBottom: 18,
+          alignItems: "flex-start"
+        }}>
+          
+          {/* Dot */}
+          {/* <div style={{
+            position: "absolute",
+            left: 6,
+            top: 6,
+            width: 12,
+            height: 12,
+            borderRadius: "50%",
+            background: "#3b82f6",
+            border: "2px solid #fff",
+            boxShadow: "0 0 0 2px #3b82f6"
+          }}
+           /> */}
+
+          {/* Content Card */}
+          <div style={{
+            marginLeft: 20,
+            flex: 1,
+            background: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 10,
+            padding: "12px 14px",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.05)"
+          }}>
+            
+            {/* Header */}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 4
+            }}>
+              <div style={{
+                fontSize: 13,
+                fontWeight: 700,
+                color: "#0f172a"
+              }}>
+                {a.date} at {a.time} — {a.type}
+              </div>
+
+              {/* Delete */}
+              <span
+                onClick={() => setActionDeleteModal({ index: idx, action: a })}
+                style={{
+                  cursor: "pointer",
+                  fontSize: 14,
+                  color: "#94a3b8",
+                  transition: "0.2s"
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                onMouseLeave={(e) => (e.currentTarget.style.color = "#94a3b8")}
+              >
+                🗑️
+              </span>
+            </div>
+
+            {/* Meeting place */}
+            {a.place && (
+              <div style={{
+                fontSize: 12,
+                color: "#64748b",
+                marginBottom: 4
+              }}>
+                📍 {a.place}
+              </div>
+            )}
+
+            {/* Description */}
+            {a.description && (
+              <div style={{
+                fontSize: 13,
+                color: "#334155",
+                lineHeight: 1.4
+              }}>
+                {a.description}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+            </div>
 
             <div style={{ padding: "0 24px 24px", display: "flex", gap: 10 }}>
               <button type="submit" style={S.btnPrimary}>{editingId ? "Save Changes" : "Add Activity"}</button>
@@ -390,7 +718,27 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
         </div>
       )}
 
-      {/* ── Table ── */}
+      {/* Lost Dialog */}
+      {showLostModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 }}>
+          <div style={{ background: "#ffffff", borderRadius: 16, width: "100%", maxWidth: 380, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", padding: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Reason Lost</h2>
+              <button onClick={() => { setShowLostModal(false); setSelectedLostReason(""); }} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "#64748b" }}>✕</button>
+            </div>
+            <select value={selectedLostReason} onChange={(e) => setSelectedLostReason(e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 8, border: "2px solid #3b82f6", fontSize: 15, background: "#fff", outline: "none", marginBottom: 24 }}>
+              <option value="">Please select ...</option>
+              <option value="Wrong time">Wrong time</option>
+              <option value="Price too high">Price too high</option>
+              <option value="No authority">No authority</option>
+              <option value="Competitor">Competitor</option>
+            </select>
+            <button onClick={handleSaveLostReason} style={{ width: "100%", background: "#6b7280", color: "#fff", border: "none", padding: "14px", borderRadius: 9999, fontSize: 15, fontWeight: 600, cursor: "pointer" }}>Save</button>
+          </div>
+        </div>
+      )}
+
+      {/* Table Section - unchanged */}
       <div style={{ padding: "0 24px 40px" }}>
         <div style={S.tableWrap}>
           <table style={S.table}>
@@ -423,19 +771,6 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
                   {visibleCols["Notes"] && <td style={{ ...S.td, minWidth: 200, maxWidth: 260, whiteSpace: "pre-wrap", color: "#64748b", fontSize: 12 }}>
                     {a.notes || <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No notes</span>}
                   </td>}
-                  {visibleCols["Deal Value"] && <td style={S.td}>
-                    {(a as any).isDeal && (a as any).dealValue
-                      ? <span style={{ fontWeight: 600, color: "#7c3aed" }}>{(a as any).dealCurrency || "INR"} {parseFloat((a as any).dealValue).toLocaleString("en-IN")}</span>
-                      : <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>-</span>}
-                  </td>}
-                  {visibleCols["Due Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>
-                    {(a as any).isDeal && (a as any).dueDate ? (a as any).dueDate : "-"}
-                  </td>}
-                  {visibleCols["Probability"] && <td style={{ ...S.td, textAlign: "center" }}>
-                    {(a as any).isDeal && (a as any).probability
-                      ? <span style={{ fontWeight: 600, color: "#0f172a" }}>{(a as any).probability}%</span>
-                      : "-"}
-                  </td>}
                   <td style={S.tdSticky}>
                     <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
                       <button onClick={() => startEdit(a)} style={S.editBtn}>Edit</button>
@@ -452,7 +787,7 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
         </div>
       </div>
 
-      {/* ── Column Selector Modal ── */}
+      {/* Column Selector Modal - unchanged */}
       {showColModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(2px)" }}>
           <div style={{ background: "#fff", borderRadius: 16, padding: "28px 32px", width: "100%", maxWidth: 460, boxShadow: "0 24px 60px rgba(0,0,0,0.2)", fontFamily: "'DM Sans', sans-serif" }}>
@@ -460,7 +795,6 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
               <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "#0f172a" }}>Select Columns</h2>
               <button onClick={() => setShowColModal(false)} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#64748b" }}>✕</button>
             </div>
-
             {[
               { title: "Activity Info", cols: ["Client Name", "Activity Name", "Date", "Stage", "Handled By", "Notes"] },
               { title: "Deal Info (shown when Deal Mode is ON)", cols: ["Deal Value", "Due Date", "Probability"] },
@@ -478,23 +812,18 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px" }}>
                   {cols.map(col => (
                     <label key={col} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#334155", cursor: "pointer", padding: "4px 0" }}>
-                      <input type="checkbox" checked={visibleCols[col]}
-                        onChange={() => setVisibleCols(p => ({ ...p, [col]: !p[col] }))}
-                        style={{ cursor: "pointer" }} />
+                      <input type="checkbox" checked={visibleCols[col]} onChange={() => setVisibleCols(p => ({ ...p, [col]: !p[col] }))} style={{ cursor: "pointer" }} />
                       {col}
                     </label>
                   ))}
                 </div>
               </div>
             ))}
-
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
-              <button onClick={() => setVisibleCols(Object.fromEntries(Object.keys(visibleCols).map(k => [k, true])))}
-                style={{ padding: "8px 16px", background: "#f1f5f9", color: "#475569", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              <button onClick={() => setVisibleCols(Object.fromEntries(Object.keys(visibleCols).map(k => [k, true])))} style={{ padding: "8px 16px", background: "#f1f5f9", color: "#475569", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
                 Reset All
               </button>
-              <button onClick={() => setShowColModal(false)}
-                style={{ padding: "8px 20px", background: "#0f172a", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              <button onClick={() => setShowColModal(false)} style={{ padding: "8px 20px", background: "#0f172a", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
                 Done
               </button>
             </div>
@@ -502,13 +831,20 @@ export default function Transactions({ onNavigate, filterLeadId }: { onNavigate:
         </div>
       )}
 
-      {/* ── Delete Modal ── */}
       {deleteModal && (
         <DeleteModal
           title="Delete Activity"
           itemName={`${deleteModal.activity.activityName} — ${deleteModal.activity.accountName}`}
           onConfirm={confirmDelete}
           onCancel={() => setDeleteModal(null)}
+        />
+      )}
+      {actionDeleteModal && (
+        <DeleteModal
+          title="Delete Action"
+          itemName={`${actionDeleteModal.action.type} - ${actionDeleteModal.action.date} at ${actionDeleteModal.action.time}`}
+          onConfirm={confirmDeleteAction}
+          onCancel={() => setActionDeleteModal(null)}
         />
       )}
     </div>

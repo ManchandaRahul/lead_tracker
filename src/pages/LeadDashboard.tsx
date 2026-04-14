@@ -14,7 +14,7 @@ import { auth } from "../firebase/config";
 import * as XLSX from "xlsx";
 import DeleteModal from "../components/DeleteModal";
 
-type Page = "leads" | "transactions" | "activity";
+type Page = "leads" | "transactions" | "activity" | "users";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const COLLECTION = "leads";
@@ -52,24 +52,40 @@ type Lead = typeof EMPTY_LEAD & { id: string; createdAt?: string };
 
 // ─── Excel column → field mapping ────────────────────────────────────────────
 const EXCEL_MAP: Record<string, keyof typeof EMPTY_LEAD> = {
-  "Lead ID":               "leadId",
-  "Lead Date":             "leadDate",
-  "Project Name":          "projectId",
-  "Project ID":            "projectId",
-  "Client Name":           "accountName",
-  "Program Name":          "programName",
-  "Account Name":          "accountName",
-  "Engagement Name":       "engagementName",
-  "Engagement Type":       "engagementType",
-  "Client SPOC":           "clientSpoc",
-  "SPOC Position":         "clientSpocPosition",
-  "Email Id":              "clientEmail",
-  "Phone Number":          "clientPhone",
-  "Partner SPOC":          "partnerSpoc",
+  "Lead ID": "leadId",
+  "Lead Date": "leadDate",
+  "Project Name": "projectId",
+  "Project ID": "projectId",
+  "Client Name": "accountName",
+  "Account Name": "accountName",
+  "Program Name": "programName",
+  "Engagement Name": "engagementName",
+  "Engagement Type": "engagementType",
+  "Client SPOC": "clientSpoc",
+  "Client Designation": "clientSpocPosition",
+  "SPOC Position": "clientSpocPosition",
+  "Client Email": "clientEmail",
+  "Email Id": "clientEmail",
+  "Client Phone": "clientPhone",
+  "Phone Number": "clientPhone",
+  "Partner SPOC": "partnerSpoc",
+  "Partner Designation": "partnerSpocPosition",
   "Partner SPOC Position": "partnerSpocPosition",
-  "Partner Email Id":      "partnerEmail",
-  "Partner Phone Number":  "partnerPhone",
+  "Partner Email": "partnerEmail",
+  "Partner Email Id": "partnerEmail",
+  "Partner Phone": "partnerPhone",
+  "Partner Phone Number": "partnerPhone",
+  "Status": "status",
+  "Remarks": "remarks",
 };
+
+function normalizeExcelHeader(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+const NORMALIZED_EXCEL_MAP = Object.fromEntries(
+  Object.entries(EXCEL_MAP).map(([column, field]) => [normalizeExcelHeader(column), field])
+) as Record<string, keyof typeof EMPTY_LEAD>;
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 function generateLeadId() {
@@ -313,6 +329,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
       let count = 0;
       for (const row of rows) {
+        const normalizedRow = Object.fromEntries(
+          Object.entries(row).map(([column, value]) => [normalizeExcelHeader(column), value])
+        ) as Record<string, any>;
+
         const lead: any = {
           ...EMPTY_LEAD,
           status: "Active",
@@ -320,13 +340,18 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           updatedAt: new Date().toISOString(),
         };
 
-        for (const [col, field] of Object.entries(EXCEL_MAP)) {
-          if (row[col] !== undefined) lead[field] = String(row[col]).trim();
+        for (const [col, field] of Object.entries(NORMALIZED_EXCEL_MAP)) {
+          if (normalizedRow[col] !== undefined) lead[field] = String(normalizedRow[col]).trim();
         }
 
-        if (row["Email Id_1"] !== undefined) lead.partnerEmail = String(row["Email Id_1"]).trim();
-        if (row["Phone Number_1"] !== undefined) lead.partnerPhone = String(row["Phone Number_1"]).trim();
-        if (row["SPOC Position_1"] !== undefined) lead.partnerSpocPosition = String(row["SPOC Position_1"]).trim();
+        if (normalizedRow["emailid1"] !== undefined) lead.partnerEmail = String(normalizedRow["emailid1"]).trim();
+        if (normalizedRow["phonenumber1"] !== undefined) lead.partnerPhone = String(normalizedRow["phonenumber1"]).trim();
+        if (normalizedRow["spocposition1"] !== undefined) lead.partnerSpocPosition = String(normalizedRow["spocposition1"]).trim();
+
+        const hasContent = Object.entries(lead).some(([key, value]) => (
+          !["createdAt", "updatedAt", "status"].includes(key) && String(value || "").trim() !== ""
+        ));
+        if (!hasContent) continue;
 
         if (!lead.leadId) lead.leadId = generateLeadId();
 
@@ -387,6 +412,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           <button onClick={() => onNavigate("leads")} style={{ ...S.navTab, ...S.navTabActive }}>Leads</button>
           <button onClick={() => onNavigate("transactions")} style={S.navTab}>Activities</button>
           {isAdmin && <button onClick={() => onNavigate("activity")} style={S.navTab}>Activity Log</button>}
+          {isAdmin && <button onClick={() => onNavigate("users")} style={S.navTab}>Users</button>}
         </div>
 
         <div style={S.headerRight}>
@@ -402,18 +428,20 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             <option value="All">All Statuses</option>
             {STATUSES.map((s) => <option key={s}>{s}</option>)}
           </select>
-          {/* Import Excel */}
-          {/* <label style={S.btnOutline}>
-            {importing ? "Importing…" : "Import Excel"}
+        
+          <button onClick={() => setShowColModal(true)} style={S.btnOutline}>Columns</button>
+            {/* Import Excel */}
+          <label style={S.btnOutline}>
+            {importing ? "Importing..." : "Import Excel"}
             <input
               ref={importRef}
               type="file"
               accept=".xlsx,.xls"
               style={{ display: "none" }}
               onChange={handleImport}
+              disabled={importing}
             />
-          </label> */}
-          <button onClick={() => setShowColModal(true)} style={S.btnOutline}>Columns</button>
+          </label>
           <button onClick={downloadExcel} style={S.btnDark}>Export Excel</button>
           <button
             onClick={() => { setShowForm(true); setEditingId(null); setFormData({ ...EMPTY_LEAD }); }}

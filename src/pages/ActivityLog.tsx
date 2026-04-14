@@ -5,7 +5,7 @@ import { signOut } from "firebase/auth";
 import { auth } from "../firebase/config";
 import { ActivityDocument, HistoryEntry } from "../firebase/activityLog";
 
-type Page = "leads" | "transactions" | "activity";
+type Page = "leads" | "transactions" | "activity" | "users";
 type LogDoc = ActivityDocument & { id: string };
 
 const ACTION_META: Record<string, { label: string; bg: string; color: string }> = {
@@ -102,6 +102,7 @@ export default function ActivityLog({ onNavigate }: { onNavigate: (p: Page, lead
           <button onClick={() => onNavigate("leads")} style={S.navTab}>Leads</button>
           <button onClick={() => onNavigate("transactions")} style={S.navTab}>Activities</button>
           <button onClick={() => onNavigate("activity")} style={{ ...S.navTab, ...S.navTabActive }}>Activity Log</button>
+          <button onClick={() => onNavigate("users")} style={S.navTab}>Users</button>
         </div>
         <div style={S.headerRight}>
           <input
