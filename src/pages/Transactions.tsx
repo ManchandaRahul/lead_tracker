@@ -2325,7 +2325,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                     </td>}
                   <td style={S.tdSticky}>
                     <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
-                      <button onClick={() => onNavigate("activityDetail", a.transactionId || a.id)} style={S.txnBtn}>View Activity</button>
+                      <button onClick={() => onNavigate("activityDetail", a.transactionId || a.id)} style={S.txnBtn}>View Actions</button>
                       <button onClick={() => startEdit(a)} style={S.editBtn}>Edit</button>
                       <button onClick={() => deleteActivity(a)} style={S.deleteBtn}>Delete</button>
                     </div>
