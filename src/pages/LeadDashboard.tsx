@@ -14,8 +14,7 @@ import { auth } from "../firebase/config";
 import * as XLSX from "xlsx";
 import DeleteModal from "../components/DeleteModal";
 import AppHeaderNav from "../components/AppHeaderNav";
-
-type Page = "leads" | "transactions" | "deals" | "activity" | "users";
+import { Page } from "../navigation";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const COLLECTION = "leads";

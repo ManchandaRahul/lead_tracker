@@ -4,8 +4,7 @@ import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { auth, db } from "../firebase/config";
 import { logActivity } from "../firebase/activityLog";
 import AppPageHeader from "../components/AppPageHeader";
-
-type Page = "leads" | "transactions" | "deals" | "activity" | "users";
+import { Page } from "../navigation";
 
 type AppUser = {
   id: string;

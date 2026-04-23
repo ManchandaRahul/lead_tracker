@@ -2325,17 +2325,10 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                     </td>}
                   <td style={S.tdSticky}>
                     <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
+                      <button onClick={() => onNavigate("activityDetail", a.transactionId || a.id)} style={S.txnBtn}>View Activity</button>
                       <button onClick={() => startEdit(a)} style={S.editBtn}>Edit</button>
                       <button onClick={() => deleteActivity(a)} style={S.deleteBtn}>Delete</button>
                     </div>
-                  </td>
-                </tr>
-                <tr>
-                  <td
-                    colSpan={Object.values(visibleCols).filter(Boolean).length + 1}
-                    style={{ padding: 0, background: "#f8fafc", borderTop: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0" }}
-                  >
-                    <ActivityActionPanel activity={a} />
                   </td>
                 </tr>
                 </Fragment>

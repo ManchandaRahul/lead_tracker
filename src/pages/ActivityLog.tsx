@@ -3,8 +3,7 @@ import { db } from "../firebase/config";
 import { collection, onSnapshot } from "firebase/firestore";
 import { ActivityDocument, HistoryEntry } from "../firebase/activityLog";
 import AppPageHeader from "../components/AppPageHeader";
-
-type Page = "leads" | "transactions" | "deals" | "activity" | "users";
+import { Page } from "../navigation";
 type LogDoc = ActivityDocument & { id: string };
 
 const ACTION_META: Record<string, { label: string; bg: string; color: string }> = {

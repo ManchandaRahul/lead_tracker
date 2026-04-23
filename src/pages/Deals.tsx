@@ -3,8 +3,7 @@ import { collection, onSnapshot } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { auth, db } from "../firebase/config";
 import AppPageHeader from "../components/AppPageHeader";
-
-type Page = "leads" | "transactions" | "deals" | "activity" | "users";
+import { Page } from "../navigation";
 
 type DealActivity = {
   id: string;
@@ -221,7 +220,7 @@ export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: s
 
                       <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                         <span style={{ fontSize: 12, color: "#94a3b8" }}>{deal.transactionId || deal.id}</span>
-                        <button type="button" onClick={() => onNavigate("transactions")} style={S.openBtn}>
+                        <button type="button" onClick={() => onNavigate("activityDetail", deal.transactionId || deal.id)} style={S.openBtn}>
                           Open Activity
                         </button>
                       </div>
