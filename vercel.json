@@ -2,5 +2,13 @@
   "buildCommand": "vite build",
   "outputDirectory": "dist",
   "installCommand": "npm install",
-  "framework": "vite"
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/leads", "destination": "/index.html" },
+    { "source": "/leads/:leadId/activities", "destination": "/index.html" },
+    { "source": "/activities", "destination": "/index.html" },
+    { "source": "/deals", "destination": "/index.html" },
+    { "source": "/activity-log", "destination": "/index.html" },
+    { "source": "/users", "destination": "/index.html" }
+  ]
 }

@@ -3,8 +3,9 @@ import { signOut } from "firebase/auth";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { auth, db } from "../firebase/config";
 import { logActivity } from "../firebase/activityLog";
+import AppPageHeader from "../components/AppPageHeader";
 
-type Page = "leads" | "transactions" | "activity" | "users";
+type Page = "leads" | "transactions" | "deals" | "activity" | "users";
 
 type AppUser = {
   id: string;
@@ -152,25 +153,20 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
 
   return (
     <div style={S.page}>
-      <div style={S.header}>
-        <div style={S.headerLeft}>
-          <img src="/k1.svg" alt="Karuyaki Logo" style={{ height: 36 }} />
-          <h1 style={S.headerTitle}>Lead Tracker</h1>
-          <span style={S.adminBadge}>Admin Only</span>
-        </div>
-        <div style={S.navTabs}>
-          <button onClick={() => onNavigate("leads")} style={S.navTab}>Leads</button>
-          <button onClick={() => onNavigate("transactions")} style={S.navTab}>Activities</button>
-          <button onClick={() => onNavigate("activity")} style={S.navTab}>Activity Log</button>
-          <button onClick={() => onNavigate("users")} style={{ ...S.navTab, ...S.navTabActive }}>Users</button>
-        </div>
-        <div style={S.headerRight}>
-          <button onClick={() => { setMessage(null); setShowCreateForm((prev) => !prev); }} style={S.btnPrimary}>
-            {showCreateForm ? "Close Form" : "+ Add User"}
-          </button>
-          <button onClick={logout} style={S.btnLogout}>Logout</button>
-        </div>
-      </div>
+      <AppPageHeader
+        current="users"
+        onNavigate={onNavigate}
+        isAdmin={isAdmin}
+        onLogout={logout}
+        showAdminBadge
+        bottomContent={
+          <div style={S.headerRight}>
+            <button onClick={() => { setMessage(null); setShowCreateForm((prev) => !prev); }} style={S.btnPrimary}>
+              {showCreateForm ? "Close Form" : "+ Add User"}
+            </button>
+          </div>
+        }
+      />
 
       {message && (
         <div style={{
@@ -301,17 +297,19 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
 
 const S: Record<string, React.CSSProperties> = {
   page: { minHeight: "100vh", background: "#f8fafc", fontFamily: "'DM Sans', 'Segoe UI', sans-serif", color: "#0f172a" },
-  header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 24px", background: "#ffffff", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0, zIndex: 100, gap: 12, flexWrap: "wrap" as "wrap" },
-  headerLeft: { display: "flex", alignItems: "center", gap: 10 },
-  headerTitle: { fontSize: 20, fontWeight: 700, margin: 0, letterSpacing: "-0.4px" },
+  header: { display: "grid", padding: "18px 24px 14px", background: "#ffffff", borderBottom: "1px solid #e9eef5", boxShadow: "0 8px 24px rgba(15,23,42,0.06)", position: "sticky", top: 0, zIndex: 100, gap: 14 },
+  headerTop: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" as "wrap" },
+  headerBottom: { display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" as "wrap" },
+  headerLeft: { display: "flex", alignItems: "center", gap: 12 },
+  headerTitle: { fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: "-0.5px", color: "#0f172a" },
   adminBadge: { fontSize: 11, fontWeight: 600, padding: "3px 8px", background: "#ede9fe", color: "#7c3aed", borderRadius: 6, border: "1px solid #ddd6fe" },
-  navTabs: { display: "flex", alignItems: "center", gap: 4 },
+  navTabs: { display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", width: "100%", order: 3 },
   navTab: { padding: "6px 14px", background: "transparent", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" },
   navTabActive: { background: "#0f172a", color: "#fff", border: "1.5px solid #0f172a" },
-  headerRight: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as "wrap" },
-  btnPrimary: { padding: "8px 16px", background: "#0f172a", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
-  btnOutline: { padding: "8px 14px", background: "#fff", color: "#0f172a", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center" },
-  btnLogout: { padding: "8px 14px", background: "#fff", color: "#ef4444", border: "1.5px solid #fecaca", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" },
+  headerRight: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" as "wrap", flex: "1 1 280px" },
+  btnPrimary: { padding: "10px 16px", background: "#0f172a", color: "#fff", border: "none", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 10px 22px rgba(15,23,42,0.16)" },
+  btnOutline: { padding: "10px 14px", background: "#fff", color: "#0f172a", border: "1px solid #d7dee8", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", boxShadow: "0 1px 2px rgba(15,23,42,0.04)" },
+  btnLogout: { padding: "10px 14px", background: "#fff", color: "#ef4444", border: "1px solid #fecaca", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" },
   formCard: { margin: "20px 24px", background: "#ffffff", borderRadius: 16, border: "1px solid #e2e8f0", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", overflow: "hidden" },
   formHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", borderBottom: "1px solid #f1f5f9", background: "#f8fafc" },
   closeBtn: { background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#64748b", padding: "4px 8px" },

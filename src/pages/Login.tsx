@@ -121,9 +121,9 @@ export default function Login() {
         <div style={styles.logoShell}>
           <img src="/k1.svg" alt="Karuyaki Logo" style={{ height: 34 }} />
         </div>
-        <h1 style={styles.title}>Sign in with email</h1>
+        <h1 style={styles.title}>Lead Tracker</h1>
         <p style={styles.subtitle}>
-          Sign in to continue managing your pipeline and team activity.
+          Manage your pipeline and team activity.
         </p>
 
         <form onSubmit={handleLogin} style={styles.form}>

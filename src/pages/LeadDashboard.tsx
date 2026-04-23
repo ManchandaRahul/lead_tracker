@@ -13,8 +13,9 @@ import { signOut } from "firebase/auth";
 import { auth } from "../firebase/config";
 import * as XLSX from "xlsx";
 import DeleteModal from "../components/DeleteModal";
+import AppHeaderNav from "../components/AppHeaderNav";
 
-type Page = "leads" | "transactions" | "activity" | "users";
+type Page = "leads" | "transactions" | "deals" | "activity" | "users";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const COLLECTION = "leads";
@@ -81,6 +82,31 @@ const EXCEL_MAP: Record<string, keyof typeof EMPTY_LEAD> = {
 
 function normalizeExcelHeader(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeImportedDate(value: unknown) {
+  if (!value) return "";
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return "";
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (slashMatch) {
+    const [, monthValue, dayValue, yearValue] = slashMatch;
+    const year = yearValue.length === 2 ? `20${yearValue}` : yearValue;
+    return `${year}-${monthValue.padStart(2, "0")}-${dayValue.padStart(2, "0")}`;
+  }
+
+  return raw;
 }
 
 const NORMALIZED_EXCEL_MAP = Object.fromEntries(
@@ -323,9 +349,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
     try {
       const data = await file.arrayBuffer();
-      const wb = XLSX.read(data);
+      const wb = XLSX.read(data, { cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
 
       let count = 0;
       for (const row of rows) {
@@ -341,7 +367,11 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
         };
 
         for (const [col, field] of Object.entries(NORMALIZED_EXCEL_MAP)) {
-          if (normalizedRow[col] !== undefined) lead[field] = String(normalizedRow[col]).trim();
+          if (normalizedRow[col] === undefined) continue;
+          lead[field] =
+            field === "leadDate"
+              ? normalizeImportedDate(normalizedRow[col])
+              : String(normalizedRow[col]).trim();
         }
 
         if (normalizedRow["emailid1"] !== undefined) lead.partnerEmail = String(normalizedRow["emailid1"]).trim();
@@ -392,7 +422,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif", background: "#f8fafc" }}>
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>🔥</div>
-          <div style={{ fontSize: 15, color: "#64748b" }}>Connecting to Firebase…</div>
+          <div style={{ fontSize: 15, color: "#64748b" }}>Loading…</div>
         </div>
       </div>
     );
@@ -400,55 +430,15 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
   return (
     <div style={S.page}>
-      {/* ── Header ── */}
       <div style={S.header}>
-        <div style={S.headerLeft}>
-          <img src="/k1.svg" alt="Karuyaki Logo" style={{ height: 36 }} />
-          <h1 style={S.headerTitle}>Lead Tracker</h1>
-        </div>
-
-        {/* ── Nav tabs ── */}
-        <div style={S.navTabs}>
-          <button onClick={() => onNavigate("leads")} style={{ ...S.navTab, ...S.navTabActive }}>Leads</button>
-          <button onClick={() => onNavigate("transactions")} style={S.navTab}>Activities</button>
-          {isAdmin && <button onClick={() => onNavigate("activity")} style={S.navTab}>Activity Log</button>}
-          {isAdmin && <button onClick={() => onNavigate("users")} style={S.navTab}>Users</button>}
-        </div>
-
-        <div style={S.headerRight}>
-          {/* Search */}
-          <input
-            placeholder="Search leads…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={S.searchInput}
-          />
-          {/* Status filter */}
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={S.select}>
-            <option value="All">All Statuses</option>
-            {STATUSES.map((s) => <option key={s}>{s}</option>)}
-          </select>
-        
-          <button onClick={() => setShowColModal(true)} style={S.btnOutline}>Columns</button>
-            {/* Import Excel */}
-          <label style={S.btnOutline}>
-            {importing ? "Importing..." : "Import Excel"}
-            <input
-              ref={importRef}
-              type="file"
-              accept=".xlsx,.xls"
-              style={{ display: "none" }}
-              onChange={handleImport}
-              disabled={importing}
-            />
-          </label>
-          <button onClick={downloadExcel} style={S.btnDark}>Export Excel</button>
-          <button
-            onClick={() => { setShowForm(true); setEditingId(null); setFormData({ ...EMPTY_LEAD }); }}
-            style={S.btnPrimary}
-          >
-            + Add Lead
-          </button>
+        <div style={S.headerTop}>
+          <div style={S.headerBrandGroup}>
+            <div style={S.headerLeft}>
+              <img src="/k1.svg" alt="Karuyaki Logo" style={{ height: 36 }} />
+              <h1 style={S.headerTitle}>Lead Tracker</h1>
+            </div>
+            <AppHeaderNav current="leads" onNavigate={onNavigate} isAdmin={isAdmin} />
+          </div>
           <button onClick={logout} style={S.btnLogout}>Logout</button>
         </div>
       </div>
@@ -486,6 +476,40 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             <span style={{ fontSize: 11, marginTop: 2 }}>{status}</span>
           </div>
         ))}
+      </div>
+
+      <div style={S.actionBar}>
+        <div style={S.headerRight}>
+          <input
+            placeholder="Search leads…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={S.searchInput}
+          />
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={S.select}>
+            <option value="All">All Statuses</option>
+            {STATUSES.map((s) => <option key={s}>{s}</option>)}
+          </select>
+          <button onClick={() => setShowColModal(true)} style={S.btnOutline}>Columns</button>
+          <label style={S.btnOutline}>
+            {importing ? "Importing..." : "Import Excel"}
+            <input
+              ref={importRef}
+              type="file"
+              accept=".xlsx,.xls"
+              style={{ display: "none" }}
+              onChange={handleImport}
+              disabled={importing}
+            />
+          </label>
+          <button onClick={downloadExcel} style={S.btnDark}>Export Excel</button>
+          <button
+            onClick={() => { setShowForm(true); setEditingId(null); setFormData({ ...EMPTY_LEAD }); }}
+            style={S.btnPrimary}
+          >
+            + Add Lead
+          </button>
+        </div>
       </div>
 
       {/* ── Add/Edit Form ── */}
@@ -785,30 +809,30 @@ const S: Record<string, React.CSSProperties> = {
     color: "#0f172a",
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "12px 24px",
+    display: "grid",
+    padding: "18px 24px 14px",
     background: "#ffffff",
-    borderBottom: "1px solid #e2e8f0",
+    borderBottom: "1px solid #e9eef5",
+    boxShadow: "0 8px 24px rgba(15,23,42,0.06)",
     position: "sticky",
     top: 0,
     zIndex: 100,
-    gap: 8,
-    flexWrap: "nowrap",
-    minWidth: 0,
+    gap: 14,
   },
-  headerLeft: { display: "flex", alignItems: "center", gap: 10 },
-  headerTitle: { fontSize: 20, fontWeight: 700, margin: 0, letterSpacing: "-0.4px" },
+  headerTop: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "nowrap" },
+  headerBrandGroup: { display: "flex", alignItems: "center", gap: 20, minWidth: 0, flex: 1 },
+  headerBottom: { display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" },
+  headerLeft: { display: "flex", alignItems: "center", gap: 12 },
+  headerTitle: { fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: "-0.5px", color: "#0f172a" },
   // ── Nav tabs ──
-  navTabs: { display: "flex", alignItems: "center", gap: 4 },
+  navTabs: { display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", width: "100%", order: 3 },
   navTab: {
-    padding: "5px 10px",
+    padding: "6px 14px",
     background: "transparent",
     color: "#64748b",
     border: "1.5px solid #e2e8f0",
     borderRadius: 8,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: 600,
     cursor: "pointer",
     whiteSpace: "nowrap",
@@ -818,68 +842,72 @@ const S: Record<string, React.CSSProperties> = {
     color: "#fff",
     border: "1.5px solid #0f172a",
   },
-  headerRight: { display: "flex", alignItems: "center", gap: 6, flexWrap: "nowrap", flexShrink: 1, minWidth: 0 },
+  headerRight: { display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 10, flexWrap: "wrap", flex: "1 1 420px" },
   searchInput: {
-    padding: "8px 12px",
-    borderRadius: 8,
-    border: "1.5px solid #e2e8f0",
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "1px solid #d7dee8",
     fontSize: 13,
-    background: "#f8fafc",
+    background: "#ffffff",
     outline: "none",
-    width: 160,
+    width: 230,
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
   },
   select: {
-    padding: "8px 10px",
-    borderRadius: 8,
-    border: "1.5px solid #e2e8f0",
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "1px solid #d7dee8",
     fontSize: 13,
-    background: "#f8fafc",
+    background: "#ffffff",
     outline: "none",
     cursor: "pointer",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
   },
   btnPrimary: {
-    padding: "8px 16px",
+    padding: "10px 16px",
     background: "#0f172a",
     color: "#fff",
     border: "none",
-    borderRadius: 8,
+    borderRadius: 12,
     fontSize: 13,
-    fontWeight: 600,
+    fontWeight: 700,
     cursor: "pointer",
     whiteSpace: "nowrap",
+    boxShadow: "0 10px 22px rgba(15,23,42,0.16)",
   },
   btnDark: {
-    padding: "8px 14px",
+    padding: "10px 14px",
     background: "#1e293b",
     color: "#fff",
     border: "none",
-    borderRadius: 8,
+    borderRadius: 12,
     fontSize: 13,
-    fontWeight: 600,
+    fontWeight: 700,
     cursor: "pointer",
     whiteSpace: "nowrap",
   },
   btnOutline: {
-    padding: "8px 14px",
+    padding: "10px 14px",
     background: "#fff",
     color: "#0f172a",
-    border: "1.5px solid #e2e8f0",
-    borderRadius: 8,
+    border: "1px solid #d7dee8",
+    borderRadius: 12,
     fontSize: 13,
-    fontWeight: 600,
+    fontWeight: 700,
     cursor: "pointer",
     whiteSpace: "nowrap",
     display: "inline-flex",
     alignItems: "center",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
   },
   btnLogout: {
-    padding: "8px 14px",
+    padding: "10px 14px",
     background: "#fff",
     color: "#ef4444",
-    border: "1.5px solid #fecaca",
-    borderRadius: 8,
+    border: "1px solid #fecaca",
+    borderRadius: 12,
     fontSize: 13,
-    fontWeight: 600,
+    fontWeight: 700,
     cursor: "pointer",
   },
   statsBar: {
@@ -890,6 +918,11 @@ const S: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #e2e8f0",
     flexWrap: "wrap",
     alignItems: "center",
+  },
+  actionBar: {
+    padding: "16px 24px 18px",
+    background: "#ffffff",
+    borderBottom: "1px solid #e2e8f0",
   },
   statTotal: {
     display: "flex",
