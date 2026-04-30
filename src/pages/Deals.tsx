@@ -17,6 +17,9 @@ type DealActivity = {
   dealValue?: string;
   dealCurrency?: string;
   probability?: string;
+  dealStatus?: string;
+  outcomeStageId?: string;
+  outcomeStageLabel?: string;
   dueDate?: string;
   dealItems?: Array<{ itemName?: string; description?: string; cost?: string; price?: string }>;
   createdAt?: string;
@@ -29,8 +32,11 @@ const DEAL_STAGE_ORDER = [
   { id: "40", label: "Needs defined" },
   { id: "60", label: "Proposal sent" },
   { id: "80", label: "Negotiation" },
-  { id: "100", label: "Won" },
 ];
+
+function getFullStageLabel(stageId?: string) {
+  return DEAL_STAGE_ORDER.find((stage) => stage.id === stageId)?.label || "-";
+}
 
 const DEAL_STAGE_COLORS: Record<string, { accent: string; soft: string }> = {
   "10": { accent: "#e11d48", soft: "#fff1f2" },
@@ -42,6 +48,12 @@ const DEAL_STAGE_COLORS: Record<string, { accent: string; soft: string }> = {
 };
 
 function getDealStage(deal: DealActivity) {
+  if ((deal.dealStatus === "lost" || deal.dealStatus === "won") && deal.outcomeStageId && DEAL_STAGE_COLORS[deal.outcomeStageId]) {
+    return deal.outcomeStageId;
+  }
+  if (deal.probability === "100") {
+    return "80";
+  }
   return deal.probability && DEAL_STAGE_COLORS[deal.probability] ? deal.probability : "10";
 }
 
@@ -72,6 +84,7 @@ export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: s
   const [loading, setLoading] = useState(true);
   const [ownerFilter, setOwnerFilter] = useState("All team members");
   const [search, setSearch] = useState("");
+  const [outcomeFilter, setOutcomeFilter] = useState<"all" | "won" | "lost">("all");
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "transactions"), (snap) => {
@@ -92,6 +105,7 @@ export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: s
   const filteredDeals = useMemo(() => {
     return deals.filter((deal) => {
       if (ownerFilter !== "All team members" && deal.handledBy !== ownerFilter) return false;
+      if (outcomeFilter !== "all" && (deal.dealStatus || "open") !== outcomeFilter) return false;
       if (!search.trim()) return true;
       const q = search.toLowerCase();
       return (
@@ -101,7 +115,27 @@ export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: s
         deal.transactionId?.toLowerCase().includes(q)
       );
     });
-  }, [deals, ownerFilter, search]);
+  }, [deals, ownerFilter, outcomeFilter, search]);
+
+  const wonCount = useMemo(
+    () =>
+      deals.filter(
+        (deal) =>
+          (ownerFilter === "All team members" || deal.handledBy === ownerFilter) &&
+          (deal.dealStatus || "open") === "won"
+      ).length,
+    [deals, ownerFilter]
+  );
+
+  const lostCount = useMemo(
+    () =>
+      deals.filter(
+        (deal) =>
+          (ownerFilter === "All team members" || deal.handledBy === ownerFilter) &&
+          (deal.dealStatus || "open") === "lost"
+      ).length,
+    [deals, ownerFilter]
+  );
 
   const groupedDeals = useMemo(() => {
     return DEAL_STAGE_ORDER.map((stage) => {
@@ -154,9 +188,37 @@ export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: s
             onChange={(e) => setSearch(e.target.value)}
             style={S.searchInput}
           />
-          <div style={S.weightedCard}>
-            <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Weighted Pipeline</span>
-            <strong style={{ fontSize: 18, color: "#0f172a" }}>INR {totalWeighted.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</strong>
+          <div style={S.toolbarRightStack}>
+            <div style={S.outcomePills}>
+              <button
+                type="button"
+                onClick={() => setOutcomeFilter((prev) => (prev === "won" ? "all" : "won"))}
+                style={{
+                  ...S.outcomePill,
+                  borderColor: outcomeFilter === "won" ? "#86efac" : "#dcfce7",
+                  background: outcomeFilter === "won" ? "#dcfce7" : "#f0fdf4",
+                  color: "#15803d",
+                }}
+              >
+                Won: {wonCount}
+              </button>
+              <button
+                type="button"
+                onClick={() => setOutcomeFilter((prev) => (prev === "lost" ? "all" : "lost"))}
+                style={{
+                  ...S.outcomePill,
+                  borderColor: outcomeFilter === "lost" ? "#fda4af" : "#fecdd3",
+                  background: outcomeFilter === "lost" ? "#ffe4e6" : "#fff1f2",
+                  color: "#be123c",
+                }}
+              >
+                Lost: {lostCount}
+              </button>
+            </div>
+            <div style={S.weightedCard}>
+              <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Weighted Pipeline</span>
+              <strong style={{ fontSize: 18, color: "#0f172a" }}>INR {totalWeighted.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</strong>
+            </div>
           </div>
         </div>
       </div>
@@ -181,12 +243,12 @@ export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: s
                 ) : (
                   stage.items.map((deal) => (
                     <div key={deal.id} style={S.dealCard}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                        <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>
                             {deal.dealName || deal.activityName || "Untitled deal"}
                           </div>
-                          <div style={{ fontSize: 13, color: "#475569", marginTop: 2 }}>
+                          <div style={{ fontSize: 13, color: "#475569", marginTop: 2, overflowWrap: "anywhere", wordBreak: "break-word" }}>
                             {deal.accountName || "No account name"}
                           </div>
                         </div>
@@ -196,6 +258,16 @@ export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: s
                       </div>
 
                       <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+                        {deal.dealStatus && deal.dealStatus !== "open" && (
+                          <div style={S.metaRow}>
+                            <span style={S.metaLabel}>Status</span>
+                            <strong style={{ color: deal.dealStatus === "won" ? "#15803d" : "#be123c", textAlign: "right", overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: "62%" }}>
+                              {deal.dealStatus === "won"
+                                ? `Won from ${deal.outcomeStageLabel || getFullStageLabel(deal.outcomeStageId)}`
+                                : `Lost at ${deal.outcomeStageLabel || getFullStageLabel(deal.outcomeStageId)}`}
+                            </strong>
+                          </div>
+                        )}
                         <div style={S.metaRow}>
                           <span style={S.metaLabel}>Amount</span>
                           <strong>{formatAmount(deal.dealValue, deal.dealCurrency)}</strong>
@@ -218,7 +290,7 @@ export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: s
                         </div>
                       </div>
 
-                      <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                      <div style={S.cardFooter}>
                         <span style={{ fontSize: 12, color: "#94a3b8" }}>{deal.transactionId || deal.id}</span>
                         <button type="button" onClick={() => onNavigate("activityDetail", deal.transactionId || deal.id)} style={S.openBtn}>
                           Open Activity
@@ -252,12 +324,15 @@ const S: Record<string, React.CSSProperties> = {
   toolbar: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 18, padding: "22px 24px 14px", flexWrap: "wrap" as "wrap" },
   toolbarTitle: { fontSize: 22, fontWeight: 800, color: "#0f172a" },
   toolbarControls: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" as "wrap" },
+  toolbarRightStack: { display: "grid", gap: 10, justifyItems: "end" as "end" },
+  outcomePills: { display: "flex", gap: 10, flexWrap: "wrap" as "wrap", justifyContent: "flex-end" as "flex-end" },
+  outcomePill: { padding: "8px 14px", borderRadius: 9999, border: "1px solid", fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" as "nowrap" },
   select: { padding: "10px 14px", borderRadius: 12, border: "1px solid #d7dee8", fontSize: 14, background: "#fff", outline: "none", cursor: "pointer", minWidth: 200, boxShadow: "0 1px 2px rgba(15,23,42,0.04)" },
   searchInput: { padding: "10px 14px", borderRadius: 12, border: "1px solid #d7dee8", fontSize: 14, background: "#fff", outline: "none", width: 220, boxShadow: "0 1px 2px rgba(15,23,42,0.04)" },
   weightedCard: { display: "flex", flexDirection: "column", gap: 4, padding: "10px 14px", background: "#fff", border: "1.5px solid #d7dee8", borderRadius: 10, minWidth: 190 },
   board: {
     display: "grid",
-    gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
     gap: 12,
     padding: "0 24px 32px",
   },
@@ -266,8 +341,38 @@ const S: Record<string, React.CSSProperties> = {
   columnBody: { display: "grid", gap: 12, alignContent: "start" },
   emptyState: { padding: "20px 14px", borderRadius: 16, border: "1.5px dashed #cbd5e1", background: "#fff", color: "#94a3b8", fontSize: 12, textAlign: "center" as "center" },
   dealCard: { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "14px", boxShadow: "0 4px 16px rgba(15,23,42,0.05)", minWidth: 0 },
-  stagePill: { padding: "5px 10px", borderRadius: 9999, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" as "nowrap" },
+  stagePill: {
+    alignSelf: "flex-start",
+    flexShrink: 0,
+    minWidth: 0,
+    padding: "6px 10px",
+    borderRadius: 9999,
+    fontSize: 11,
+    fontWeight: 700,
+    lineHeight: 1,
+    textAlign: "center" as "center",
+    whiteSpace: "nowrap" as "nowrap",
+  },
   metaRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 12, color: "#334155" },
   metaLabel: { color: "#64748b", fontWeight: 600 },
-  openBtn: { padding: "7px 12px", borderRadius: 9999, border: "1px solid #cbd5e1", background: "#fff", color: "#2563eb", fontSize: 12, fontWeight: 700, cursor: "pointer" },
+  cardFooter: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTop: "1px solid #e2e8f0",
+    display: "grid",
+    gap: 10,
+    justifyItems: "start" as "start",
+  },
+  openBtn: {
+    padding: "9px 14px",
+    borderRadius: 9999,
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontSize: 13,
+    fontWeight: 700,
+    lineHeight: 1,
+    whiteSpace: "nowrap" as "nowrap",
+    cursor: "pointer",
+  },
 };

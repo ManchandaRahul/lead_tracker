@@ -19,6 +19,15 @@ const DEAL_PIPELINE_STAGES = [
   { id: "100", label: "Won", percent: "100%" },
 ];
 
+const DEAL_PIPELINE_STAGE_FULL_LABELS: Record<string, string> = {
+  "10": "Qualified",
+  "20": "Meeting arranged",
+  "40": "Needs defined",
+  "60": "Proposal sent",
+  "80": "Negotiation",
+  "100": "Won",
+};
+
 type DealItem = {
   itemName: string;
   description: string;
@@ -39,6 +48,8 @@ type TimelineEntry = {
   createdAt: string;
   createdBy?: string;
 };
+
+type DealTimelineFilter = "all" | "inprogress" | "won" | "lost";
 
 const TIMELINE_FILTERS: { key: "all" | TimelineCategory; label: string }[] = [
   { key: "all", label: "All" },
@@ -84,6 +95,9 @@ const EMPTY_ACTIVITY = {
   dealItems: [createEmptyDealItem()],
   dueDate: "",
   probability: "",
+  dealStatus: "open",
+  outcomeStageId: "",
+  outcomeStageLabel: "",
   wonDate: "",
   wonTime: "",
   actions: [] as TimelineEntry[],
@@ -114,6 +128,23 @@ function generateTimelineId() {
   return `TL_${Date.now()}_${Math.floor(Math.random() * 9000 + 1000)}`;
 }
 
+function expandDealStageText(value: string) {
+  return value
+    .replace(/Meeting ar\.\.\./g, "Meeting arranged")
+    .replace(/Needs defi\.\.\./g, "Needs defined")
+    .replace(/Proposal s\.\.\.\./g, "Proposal sent")
+    .replace(/Proposal s\.\.\./g, "Proposal sent");
+}
+
+function formatDisplayDate(value?: string) {
+  if (!value) return "";
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    return `${isoMatch[3]}-${isoMatch[2]}-${isoMatch[1]}`;
+  }
+  return value;
+}
+
 function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
   return entries.map((entry, index) => {
     const category = (entry.category || entry.type?.toLowerCase?.() || "update") as TimelineCategory;
@@ -121,11 +152,11 @@ function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
     return {
       id: entry.id || `${createdAt}_${index}`,
       category,
-      title: entry.title || entry.type || TIMELINE_META[category]?.label || "Update",
-      description: entry.description || "",
+      title: expandDealStageText(entry.title || entry.type || TIMELINE_META[category]?.label || "Update"),
+      description: expandDealStageText(entry.description || ""),
       date: entry.date || createdAt.slice(0, 10),
       time: entry.time || "",
-      place: entry.place || "",
+      place: expandDealStageText(entry.place || ""),
       createdAt,
       createdBy: entry.createdBy || entry.actionBy || "",
     };
@@ -159,8 +190,14 @@ function getEffectiveAmountFromActivity(activity: Partial<Activity>) {
 }
 
 function getStageLabel(probability?: string) {
-  const match = DEAL_PIPELINE_STAGES.find((stage) => stage.id === (probability || "10"));
-  return match ? `${match.percent} ${match.label}` : `${probability || "0"}%`;
+  const id = probability || "10";
+  const match = DEAL_PIPELINE_STAGES.find((stage) => stage.id === id);
+  const fullLabel = DEAL_PIPELINE_STAGE_FULL_LABELS[id];
+  return match && fullLabel ? `${match.percent} ${fullLabel}` : `${probability || "0"}%`;
+}
+
+function getValidStageId(probability?: string) {
+  return DEAL_PIPELINE_STAGES.some((stage) => stage.id === (probability || "")) ? (probability as string) : "10";
 }
 
 function buildActivityDraft(activity: Activity) {
@@ -202,11 +239,15 @@ export default function ActivityDetail({
   const [actionDeleteModal, setActionDeleteModal] = useState<{ index: number; action: TimelineEntry } | null>(null);
   const [deletedActionLogs, setDeletedActionLogs] = useState<{ action: any; reason: string; deletedAt: string }[]>([]);
   const [activeAction, setActiveAction] = useState<"Note" | "Call" | "Meeting" | null>(null);
+  const [showDealEditor, setShowDealEditor] = useState(false);
   const [actionTime, setActionTime] = useState("11:31");
+  const [meetingMode, setMeetingMode] = useState<"offline" | "online">("offline");
   const [meetingPlace, setMeetingPlace] = useState("");
+  const [meetingUrl, setMeetingUrl] = useState("");
   const [actionDescription, setActionDescription] = useState("");
   const [actionDate, setActionDate] = useState(new Date().toISOString().slice(0, 10));
   const [timelineFilter, setTimelineFilter] = useState<"all" | TimelineCategory>("all");
+  const [dealTimelineFilter, setDealTimelineFilter] = useState<DealTimelineFilter>("all");
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, "transactions"), (snap) => {
@@ -240,9 +281,13 @@ export default function ActivityDetail({
       setDraft(buildActivityDraft(selectedActivity));
       setDeletedActionLogs([]);
       setActiveAction(null);
+      setShowDealEditor(!!selectedActivity.isDeal);
       setActionDescription("");
+      setMeetingMode("offline");
       setMeetingPlace("");
+      setMeetingUrl("");
       setTimelineFilter("all");
+      setDealTimelineFilter("all");
       setSaveFeedback(null);
     }
   }, [selectedActivity]);
@@ -250,8 +295,25 @@ export default function ActivityDetail({
   const timelineEntries = normalizeTimelineEntries(draft.actions || []).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
-  const filteredTimelineEntries =
-    timelineFilter === "all" ? timelineEntries : timelineEntries.filter((entry) => entry.category === timelineFilter);
+  const filteredTimelineEntries = useMemo(() => {
+    const primaryFiltered =
+      timelineFilter === "all" ? timelineEntries : timelineEntries.filter((entry) => entry.category === timelineFilter);
+
+    if (timelineFilter !== "deal") {
+      return primaryFiltered;
+    }
+
+    if (dealTimelineFilter === "all") return primaryFiltered;
+    if (dealTimelineFilter === "won") {
+      return primaryFiltered.filter((entry) => entry.title === "Deal Won" || entry.title === "Deal Won Date Updated");
+    }
+    if (dealTimelineFilter === "lost") {
+      return primaryFiltered.filter((entry) => entry.title === "Deal Lost");
+    }
+    return primaryFiltered.filter(
+      (entry) => !["Deal Won", "Deal Won Date Updated", "Deal Lost"].includes(entry.title)
+    );
+  }, [timelineEntries, timelineFilter, dealTimelineFilter]);
 
   const effectiveDealAmount = getEffectiveAmountFromActivity(draft);
   const commissionValue =
@@ -327,6 +389,9 @@ export default function ActivityDetail({
       );
     }
 
+    const previousStageId = getValidStageId(previousActivity.probability);
+    const nextStageId = getValidStageId(nextActivity.probability);
+
     if ((previousActivity.probability || "10") !== (nextActivity.probability || "10")) {
       entries.push(
         createTimelineEntry(
@@ -334,6 +399,17 @@ export default function ActivityDetail({
           "deal",
           "Deal Stage Updated",
           `Deal stage changed from ${getStageLabel(previousActivity.probability)} to ${getStageLabel(nextActivity.probability)}.`
+        )
+      );
+    }
+
+    if ((previousActivity.dealStatus || "open") !== "won" && nextActivity.dealStatus === "won") {
+      entries.push(
+        createTimelineEntry(
+          user.username,
+          "deal",
+          "Deal Won",
+          `Deal was won from ${getStageLabel(previousStageId)}.`
         )
       );
     }
@@ -484,48 +560,96 @@ export default function ActivityDetail({
     }
   };
 
-  const saveAction = () => {
+  const saveAction = async () => {
     if (!activeAction) return;
     const category = activeAction.toLowerCase() as TimelineCategory;
+    const meetingContext =
+      activeAction === "Meeting"
+        ? meetingMode === "online"
+          ? `Online - ${meetingUrl.trim()}`
+          : meetingPlace.trim()
+        : "";
     const newAction = createTimelineEntry(user.username, category, activeAction, actionDescription || "", {
       date: actionDate,
       time: actionTime,
-      place: meetingPlace || "",
+      place: meetingContext,
     });
-    setDraft((prev) => ({
-      ...prev,
-      actions: [...normalizeTimelineEntries(prev.actions || []), newAction],
-    }));
+    const nextDraft = {
+      ...draft,
+      actions: [...normalizeTimelineEntries(draft.actions || []), newAction],
+    };
+    setDraft(nextDraft);
+    try {
+      await persistActivity(nextDraft);
+      setSaveFeedback({ type: "success", message: `${activeAction} saved successfully.` });
+    } catch (error) {
+      setSaveFeedback({ type: "error", message: `Failed to save ${activeAction.toLowerCase()}. Please try again.` });
+      return;
+    }
     setActiveAction(null);
     setActionDescription("");
+    setMeetingMode("offline");
     setMeetingPlace("");
+    setMeetingUrl("");
   };
 
-  const handleSaveLostReason = () => {
+  const saveDeal = async () => {
+    try {
+      await persistActivity(draft);
+      setShowDealEditor(false);
+      setSaveFeedback({ type: "success", message: "Deal saved successfully." });
+    } catch (error) {
+      setSaveFeedback({ type: "error", message: "Failed to save deal. Please try again." });
+    }
+  };
+
+  const handleSaveLostReason = async () => {
     if (!selectedLostReason) return;
-    const reasonText = `Deal marked as lost. Reason: ${selectedLostReason}`;
-    setDraft((prev) => ({
-      ...prev,
+    const currentStageId = getValidStageId(draft.probability);
+    const currentStageLabel = getStageLabel(currentStageId);
+    const reasonText = `Deal was lost at ${currentStageLabel}. Reason: ${selectedLostReason}`;
+    const nextDraft = {
+      ...draft,
       probability: "0",
-      actions: [...normalizeTimelineEntries(prev.actions || []), createTimelineEntry(user.username, "deal", "Deal Lost", reasonText)],
-    }));
+      dealStatus: "lost",
+      outcomeStageId: currentStageId,
+      outcomeStageLabel: currentStageLabel,
+      actions: [...normalizeTimelineEntries(draft.actions || []), createTimelineEntry(user.username, "deal", "Deal Lost", reasonText)],
+    };
+    setDraft(nextDraft);
+    try {
+      await persistActivity(nextDraft);
+      setSaveFeedback({ type: "success", message: "Deal loss updated successfully." });
+    } catch (error) {
+      setSaveFeedback({ type: "error", message: "Failed to save lost deal state. Please try again." });
+      return;
+    }
     setShowLostModal(false);
     setSelectedLostReason("");
   };
 
-  const confirmDeleteAction = (reason: string) => {
+  const confirmDeleteAction = async (reason: string) => {
     if (!actionDeleteModal) return;
     const updated = [...normalizeTimelineEntries(draft.actions || [])];
     updated.splice(actionDeleteModal.index, 1);
-    setDraft((prev) => ({ ...prev, actions: updated }));
-    setDeletedActionLogs((prev) => [
-      ...prev,
+    const nextDeletedActionLogs = [
+      ...deletedActionLogs,
       {
         action: actionDeleteModal.action,
         reason,
         deletedAt: new Date().toISOString(),
       },
-    ]);
+    ];
+    const nextDraft = { ...draft, actions: updated };
+    setDraft(nextDraft);
+    setDeletedActionLogs(nextDeletedActionLogs);
+    try {
+      await persistActivity(nextDraft);
+      setSaveFeedback({ type: "success", message: "Timeline item deleted successfully." });
+    } catch (error) {
+      setSaveFeedback({ type: "error", message: "Failed to delete timeline item. Please try again." });
+      return;
+    }
     setActionDeleteModal(null);
   };
 
@@ -709,38 +833,56 @@ export default function ActivityDetail({
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
             <button
               type="button"
-              onClick={() =>
+              onClick={() => {
+                setActiveAction(null);
+                setActionDescription("");
+                setMeetingMode("offline");
+                setMeetingPlace("");
+                setMeetingUrl("");
                 setDraft((prev) => ({
                   ...prev,
-                  isDeal: !prev.isDeal,
-                  probability: prev.isDeal ? "" : prev.probability || "10",
+                  isDeal: true,
+                  probability: prev.probability || "10",
                   dealItems: prev.dealItems && prev.dealItems.length > 0 ? prev.dealItems : [createEmptyDealItem()],
-                }))
-              }
+                }));
+                setShowDealEditor((prev) => !prev || !draft.isDeal);
+              }}
               style={{
                 padding: "8px 20px",
                 borderRadius: 9999,
-                border: draft.isDeal ? "1px solid #be185d" : "1px solid #cbd5e1",
-                background: draft.isDeal ? "#e11d48" : "#fff",
-                color: draft.isDeal ? "#fff" : "#334155",
+                border: showDealEditor ? "1px solid #be185d" : "1px solid #cbd5e1",
+                background: showDealEditor ? "#e11d48" : "#fff",
+                color: showDealEditor ? "#fff" : "#334155",
                 fontSize: 14,
                 fontWeight: 700,
                 cursor: "pointer",
               }}
             >
-              {draft.isDeal ? "Deal On" : "+ Deal"}
+              {showDealEditor ? "Deal On" : "+ Deal"}
             </button>
             {(["Note", "Call", "Meeting"] as const).map((type) => (
-              <button key={type} type="button" onClick={() => { setActiveAction(type); setActionDescription(""); setMeetingPlace(""); }} style={S.quickBtn}>
+              <button
+                key={type}
+                type="button"
+                onClick={() => {
+                  setShowDealEditor(false);
+                  setActiveAction(type);
+                  setActionDescription("");
+                  setMeetingMode("offline");
+                  setMeetingPlace("");
+                  setMeetingUrl("");
+                }}
+                style={S.quickBtn}
+              >
                 + {type}
               </button>
             ))}
           </div>
 
-          {draft.isDeal && (
+          {draft.isDeal && showDealEditor && (
             <div style={S.dealCard}>
               <div style={S.dealTop}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <span style={S.dealAmount}>
                     {draft.dealCurrency} {effectiveDealAmount.toLocaleString("en-IN")}
                   </span>
@@ -760,7 +902,18 @@ export default function ActivityDetail({
                     <Fragment key={stage.id}>
                       <button
                         type="button"
-                        onClick={() => setDraft({ ...draft, probability: stage.id })}
+                        onClick={() =>
+                          setDraft((prev) => {
+                            const previousStageId = getValidStageId(prev.probability);
+                            return {
+                              ...prev,
+                              probability: stage.id,
+                              dealStatus: stage.id === "100" ? "won" : "open",
+                              outcomeStageId: stage.id === "100" ? previousStageId : "",
+                              outcomeStageLabel: stage.id === "100" ? getStageLabel(previousStageId) : "",
+                            };
+                          })
+                        }
                         style={{
                           padding: "0 14px",
                           minHeight: 34,
@@ -787,7 +940,7 @@ export default function ActivityDetail({
                 })}
               </div>
 
-              <div style={S.dealGrid}>
+                <div style={S.dealGrid}>
                 <div>
                   <div style={{ marginBottom: 18 }}>
                     <label style={S.fLabel}>Deal name</label>
@@ -900,6 +1053,20 @@ export default function ActivityDetail({
                   </div>
                 </div>
               </div>
+
+              <div style={S.dealFooterActions}>
+                <button type="button" onClick={saveDeal} style={S.btnPrimary}>Save Deal</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(buildActivityDraft(selectedActivity));
+                    setShowDealEditor(false);
+                  }}
+                  style={S.btnOutline}
+                >
+                  Reset
+                </button>
+              </div>
             </div>
           )}
 
@@ -908,15 +1075,52 @@ export default function ActivityDetail({
               <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
               <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
                 <input type="time" value={actionTime} onChange={(e) => setActionTime(e.target.value)} style={{ ...S.fInput, width: 140 }} />
-                {activeAction === "Meeting" && <input type="text" placeholder="Meeting place" value={meetingPlace} onChange={(e) => setMeetingPlace(e.target.value)} style={{ ...S.fInput, flex: 1 }} />}
+                {activeAction === "Meeting" && (
+                  <select value={meetingMode} onChange={(e) => setMeetingMode(e.target.value as "offline" | "online")} style={{ ...S.fInput, width: 160 }}>
+                    <option value="offline">Offline</option>
+                    <option value="online">Online</option>
+                  </select>
+                )}
               </div>
+              {activeAction === "Meeting" && (
+                <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+                  {meetingMode === "online" ? (
+                    <input
+                      type="url"
+                      placeholder="Meeting URL"
+                      value={meetingUrl}
+                      onChange={(e) => setMeetingUrl(e.target.value)}
+                      style={{ ...S.fInput, flex: 1 }}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="Meeting place"
+                      value={meetingPlace}
+                      onChange={(e) => setMeetingPlace(e.target.value)}
+                      style={{ ...S.fInput, flex: 1 }}
+                    />
+                  )}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
                 <input type="date" value={actionDate} onChange={(e) => setActionDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
                 <textarea rows={4} placeholder={`Describe this ${activeAction.toLowerCase()}...`} value={actionDescription} onChange={(e) => setActionDescription(e.target.value)} style={{ ...S.fInput, flex: 1, resize: "vertical" }} />
               </div>
               <div style={{ display: "flex", gap: 10 }}>
                 <button type="button" onClick={saveAction} style={S.btnPrimary}>Save {activeAction}</button>
-                <button type="button" onClick={() => setActiveAction(null)} style={S.btnOutline}>Cancel</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveAction(null);
+                    setMeetingMode("offline");
+                    setMeetingPlace("");
+                    setMeetingUrl("");
+                  }}
+                  style={S.btnOutline}
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           )}
@@ -928,7 +1132,10 @@ export default function ActivityDetail({
                 <button
                   key={filter.key}
                   type="button"
-                  onClick={() => setTimelineFilter(filter.key)}
+                  onClick={() => {
+                    setTimelineFilter(filter.key);
+                    if (filter.key !== "deal") setDealTimelineFilter("all");
+                  }}
                   style={{
                     padding: "8px 16px",
                     borderRadius: 9999,
@@ -947,6 +1154,39 @@ export default function ActivityDetail({
             </div>
           </div>
 
+          {timelineFilter === "deal" && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              {[
+                { key: "all", label: "All Deals" },
+                { key: "inprogress", label: "Deal Inprogress" },
+                { key: "won", label: "Deal Won" },
+                { key: "lost", label: "Deal Lost" },
+              ].map((filter) => {
+                const isActive = dealTimelineFilter === filter.key;
+                return (
+                  <button
+                    key={filter.key}
+                    type="button"
+                    onClick={() => setDealTimelineFilter(filter.key as DealTimelineFilter)}
+                    style={{
+                      padding: "7px 14px",
+                      borderRadius: 9999,
+                      border: "1px solid",
+                      borderColor: isActive ? "#fecdd3" : "transparent",
+                      background: isActive ? "#fff1f2" : "#f8fafc",
+                      color: isActive ? "#be123c" : "#64748b",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {filter.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {filteredTimelineEntries.length === 0 ? (
             <div style={S.emptyTimeline}>No timeline entries yet for this filter.</div>
           ) : (
@@ -959,16 +1199,19 @@ export default function ActivityDetail({
                     <div style={S.timelineDot} />
                     <div style={S.timelineBody}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
-                        <div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                            <span style={{ padding: "4px 10px", borderRadius: 9999, background: meta.bg, color: meta.color, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>{meta.label}</span>
-                            <span style={{ fontSize: 12, color: "#64748b" }}>{entry.date}{entry.time ? ` at ${entry.time}` : ""}</span>
-                          </div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: entry.description ? 4 : 0 }}>{entry.title}</div>
-                          {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0 }}>Place: {entry.place}</div>}
-                          {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45 }}>{entry.description}</div>}
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                              <span style={{ padding: "4px 10px", borderRadius: 9999, background: meta.bg, color: meta.color, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>{meta.label}</span>
+                              <span style={{ fontSize: 12, color: "#64748b" }}>{formatDisplayDate(entry.date)}{entry.time ? ` at ${entry.time}` : ""}</span>
+                            </div>
+                            {entry.createdBy && (
+                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Created by: {entry.createdBy}</div>
+                            )}
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: entry.description ? 4 : 0, overflowWrap: "anywhere", wordBreak: "break-word" }}>{entry.title}</div>
+                            {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, overflowWrap: "anywhere", wordBreak: "break-word" }}>Place: {entry.place}</div>}
+                            {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, overflowWrap: "anywhere", wordBreak: "break-word" }}>{entry.description}</div>}
                         </div>
-                        <button type="button" onClick={() => setActionDeleteModal({ index: originalIndex, action: entry })} style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer" }}>×</button>
+                        <button type="button" onClick={() => setActionDeleteModal({ index: originalIndex, action: entry })} style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start" }}>×</button>
                       </div>
                     </div>
                   </div>
@@ -977,10 +1220,6 @@ export default function ActivityDetail({
             </div>
           )}
 
-          <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
-            <button type="button" onClick={() => persistActivity(draft)} style={S.btnPrimary}>Save Actions</button>
-            <button type="button" onClick={() => setDraft(buildActivityDraft(selectedActivity))} style={S.btnOutline}>Reset</button>
-          </div>
         </div>
       </div>
 
@@ -1057,6 +1296,7 @@ const S: Record<string, React.CSSProperties> = {
   lostBtn: { padding: "8px 16px", background: "#fff1f2", color: "#be123c", border: "1px solid #fecdd3", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" },
   pipelineRow: { display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, marginBottom: 18 },
   dealGrid: { display: "grid", gridTemplateColumns: "minmax(0, 1.65fr) minmax(260px, 0.95fr)", gap: 18, alignItems: "start" },
+  dealFooterActions: { marginTop: 18, paddingTop: 14, borderTop: "1px solid #e2e8f0", display: "flex", gap: 10 },
   toggleRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, fontSize: 13, fontWeight: 700, color: "#334155" },
   pipelineValueCard: { padding: "12px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10 },
   pipelineValueLabel: { fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 },
