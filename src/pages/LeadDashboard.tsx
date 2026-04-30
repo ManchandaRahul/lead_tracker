@@ -652,7 +652,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   "Client SPOC","Client Designation","Client Email","Client Phone",
                   "Partner SPOC","Partner Designation","Partner Email","Partner Phone",
                   "Status","Remarks"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map((h) => (
-                  <th key={h} style={h === "Actions" ? S.thSticky : S.th}>
+                  <th key={h} style={h === "Actions" ? S.thSticky : h === "Client Name" ? S.thClientSticky : S.th}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                       {h}
                       {({
@@ -685,7 +685,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
                   {visibleCols["Lead Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{lead.leadDate || "-"}</td>}
-                  {visibleCols["Client Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 140 }}>{lead.accountName}</td>}
+                  {visibleCols["Client Name"] && <td style={{ ...S.tdClientSticky, fontWeight: 600, minWidth: 140 }}>{lead.accountName}</td>}
                   {visibleCols["Program Name"] && <td style={{ ...S.td, minWidth: 140 }}>{(lead as any).programName || "-"}</td>}
                   {visibleCols["Project Name"] && <td style={S.td}>{lead.projectId}</td>}
                   {visibleCols["Engagement Name"] && <td style={{ ...S.td, minWidth: 160 }}>{lead.engagementName}</td>}
@@ -1037,6 +1037,21 @@ const S: Record<string, React.CSSProperties> = {
     zIndex: 3,
     boxShadow: "-2px 0 6px rgba(0,0,0,0.06)",
   },
+  thClientSticky: {
+    padding: "12px 14px",
+    textAlign: "left",
+    background: "#f8fafc",
+    color: "#475569",
+    fontWeight: 700,
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    borderBottom: "1px solid #e2e8f0",
+    position: "sticky",
+    top: 0,
+    left: 0,
+    zIndex: 4,
+    boxShadow: "2px 0 6px rgba(0,0,0,0.06)",
+  },
   tdSticky: {
     padding: "11px 14px",
     color: "#334155",
@@ -1047,6 +1062,17 @@ const S: Record<string, React.CSSProperties> = {
     background: "#ffffff",
     zIndex: 1,
     boxShadow: "-2px 0 6px rgba(0,0,0,0.06)",
+  },
+  tdClientSticky: {
+    padding: "11px 14px",
+    color: "#334155",
+    verticalAlign: "top",
+    fontSize: 13,
+    position: "sticky",
+    left: 0,
+    background: "#ffffff",
+    zIndex: 2,
+    boxShadow: "2px 0 6px rgba(0,0,0,0.06)",
   },
   tr: {
     borderBottom: "1px solid #f1f5f9",
