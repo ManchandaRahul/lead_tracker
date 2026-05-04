@@ -428,12 +428,12 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         actionBy: user.username, timestamp: new Date().toISOString(),
       });
       for (const dealEntry of dealTimelineEntries) {
-        await logActivity(payload.transactionId, payload.accountName, "transactions", {
-          actionType: "TXN_ADDED",
-          description: dealEntry.description,
-          actionBy: user.username,
-          timestamp: dealEntry.createdAt,
-        });
+      await logActivity(payload.transactionId, payload.accountName, "transactions", {
+        actionType: "TXN_ADDED",
+        description: dealEntry.description,
+        actionBy: user.username,
+        timestamp: dealEntry.createdAt,
+      });
       }
     }
     resetForm();

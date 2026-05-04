@@ -47,6 +47,7 @@ type TimelineEntry = {
   place?: string;
   createdAt: string;
   createdBy?: string;
+  amount?: string;
 };
 
 type DealTimelineFilter = "all" | "inprogress" | "won" | "lost";
@@ -159,6 +160,7 @@ function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
       place: expandDealStageText(entry.place || ""),
       createdAt,
       createdBy: entry.createdBy || entry.actionBy || "",
+      amount: entry.amount || "",
     };
   });
 }
@@ -180,6 +182,7 @@ function createTimelineEntry(
     place: overrides.place || "",
     createdAt: overrides.createdAt || new Date().toISOString(),
     createdBy: overrides.createdBy || userName,
+    amount: overrides.amount || "",
   };
 }
 
@@ -187,6 +190,10 @@ function getEffectiveAmountFromActivity(activity: Partial<Activity>) {
   const rawAmount = parseFloat(String(activity.dealValue || "0")) || 0;
   const rawMonths = parseFloat(String(activity.dealDurationMonths || "0")) || 0;
   return activity.isMultiMonth ? rawAmount * Math.max(rawMonths, 1) : rawAmount;
+}
+
+function formatDealAmount(activity: Partial<Activity>) {
+  return `${activity.dealCurrency || "INR"} ${getEffectiveAmountFromActivity(activity).toLocaleString("en-IN")}`;
 }
 
 function getStageLabel(probability?: string) {
@@ -326,6 +333,7 @@ export default function ActivityDetail({
 
   const getDealTimelineEntries = (previousActivity: Activity | null, nextActivity: typeof EMPTY_ACTIVITY) => {
     const entries: TimelineEntry[] = [];
+    const currentAmount = formatDealAmount(nextActivity);
 
     if (!previousActivity && nextActivity.isDeal) {
       entries.push(
@@ -333,7 +341,8 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Deal Created",
-          `Deal "${nextActivity.dealName || nextActivity.activityName}" was created at ${nextActivity.dealCurrency} ${getEffectiveAmountFromActivity(nextActivity).toLocaleString("en-IN")} in ${getStageLabel(nextActivity.probability)}.`
+          `Deal "${nextActivity.dealName || nextActivity.activityName}" was created at ${nextActivity.dealCurrency} ${getEffectiveAmountFromActivity(nextActivity).toLocaleString("en-IN")} in ${getStageLabel(nextActivity.probability)}.`,
+          { amount: currentAmount }
         )
       );
       return entries;
@@ -349,7 +358,8 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Deal Added",
-          `Deal was added to this activity at ${nextActivity.dealCurrency} ${getEffectiveAmountFromActivity(nextActivity).toLocaleString("en-IN")}.`
+          `Deal was added to this activity at ${nextActivity.dealCurrency} ${getEffectiveAmountFromActivity(nextActivity).toLocaleString("en-IN")}.`,
+          { amount: currentAmount }
         )
       );
       return entries;
@@ -368,7 +378,8 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Deal Name Updated",
-          `Deal name changed from "${previousActivity.dealName || "Untitled Deal"}" to "${nextActivity.dealName || "Untitled Deal"}".`
+          `Deal name changed from "${previousActivity.dealName || "Untitled Deal"}" to "${nextActivity.dealName || "Untitled Deal"}".`,
+          { amount: currentAmount }
         )
       );
     }
@@ -384,7 +395,8 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Deal Amount Updated",
-          `Deal amount changed from ${(previousActivity.dealCurrency || "INR")} ${previousAmount.toLocaleString("en-IN")} to ${(nextActivity.dealCurrency || "INR")} ${nextAmount.toLocaleString("en-IN")}.`
+          `Deal amount changed from ${(previousActivity.dealCurrency || "INR")} ${previousAmount.toLocaleString("en-IN")} to ${(nextActivity.dealCurrency || "INR")} ${nextAmount.toLocaleString("en-IN")}.`,
+          { amount: currentAmount }
         )
       );
     }
@@ -398,7 +410,8 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Deal Stage Updated",
-          `Deal stage changed from ${getStageLabel(previousActivity.probability)} to ${getStageLabel(nextActivity.probability)}.`
+          `Deal stage changed from ${getStageLabel(previousActivity.probability)} to ${getStageLabel(nextActivity.probability)}.`,
+          { amount: currentAmount }
         )
       );
     }
@@ -409,7 +422,8 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Deal Won",
-          `Deal was won from ${getStageLabel(previousStageId)}.`
+          `Deal was won from ${getStageLabel(previousStageId)}.`,
+          { amount: currentAmount }
         )
       );
     }
@@ -420,7 +434,8 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Multi-month Updated",
-          `Multi-month was turned ${nextActivity.isMultiMonth ? "on" : "off"}.`
+          `Multi-month was turned ${nextActivity.isMultiMonth ? "on" : "off"}.`,
+          { amount: currentAmount }
         )
       );
     }
@@ -431,7 +446,8 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Commission Updated",
-          `Commission was turned ${nextActivity.hasCommission ? "on" : "off"}.`
+          `Commission was turned ${nextActivity.hasCommission ? "on" : "off"}.`,
+          { amount: currentAmount }
         )
       );
     }
@@ -445,7 +461,8 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Commission Percentage Updated",
-          `Commission changed from ${previousActivity.commissionPercent || "0"}% to ${nextActivity.commissionPercent || "0"}%.`
+          `Commission changed from ${previousActivity.commissionPercent || "0"}% to ${nextActivity.commissionPercent || "0"}%.`,
+          { amount: currentAmount }
         )
       );
     }
@@ -456,7 +473,8 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Cost Tracking Updated",
-          `Cost tracking was turned ${nextActivity.hasCost ? "on" : "off"}.`
+          `Cost tracking was turned ${nextActivity.hasCost ? "on" : "off"}.`,
+          { amount: currentAmount }
         )
       );
     }
@@ -467,7 +485,8 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Expected Close Date Updated",
-          `Expected close date changed from ${previousActivity.dueDate || "not set"} to ${nextActivity.dueDate || "not set"}.`
+          `Expected close date changed from ${previousActivity.dueDate || "not set"} to ${nextActivity.dueDate || "not set"}.`,
+          { amount: currentAmount }
         )
       );
     }
@@ -478,13 +497,14 @@ export default function ActivityDetail({
           user.username,
           "deal",
           "Deal Won Date Updated",
-          `Won date changed to ${nextActivity.wonDate}${nextActivity.wonTime ? ` at ${nextActivity.wonTime}` : ""}.`
+          `Won date changed to ${nextActivity.wonDate}${nextActivity.wonTime ? ` at ${nextActivity.wonTime}` : ""}.`,
+          { amount: currentAmount }
         )
       );
     }
 
     if (JSON.stringify(previousActivity.dealItems || []) !== JSON.stringify(nextActivity.dealItems || [])) {
-      entries.push(createTimelineEntry(user.username, "deal", "Deal Items Updated", "Deal items were updated."));
+      entries.push(createTimelineEntry(user.username, "deal", "Deal Items Updated", "Deal items were updated.", { amount: currentAmount }));
     }
 
     return entries;
@@ -1207,6 +1227,11 @@ export default function ActivityDetail({
                             {entry.createdBy && (
                               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Created by: {entry.createdBy}</div>
                             )}
+                            {entry.category === "deal" && entry.amount && (
+                              <div style={{ marginBottom: 8 }}>
+                                <span style={S.timelineAmountPill}>Amount: {entry.amount}</span>
+                              </div>
+                            )}
                             <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: entry.description ? 4 : 0, overflowWrap: "anywhere", wordBreak: "break-word" }}>{entry.title}</div>
                             {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, overflowWrap: "anywhere", wordBreak: "break-word" }}>Place: {entry.place}</div>}
                             {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, overflowWrap: "anywhere", wordBreak: "break-word" }}>{entry.description}</div>}
@@ -1307,6 +1332,7 @@ const S: Record<string, React.CSSProperties> = {
   timelineEntry: { display: "flex", gap: 14, alignItems: "flex-start" },
   timelineDot: { width: 12, height: 12, borderRadius: "50%", background: "#93c5fd", marginTop: 14, boxShadow: "0 0 0 4px #dbeafe" },
   timelineBody: { flex: 1, background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", boxShadow: "0 2px 6px rgba(0,0,0,0.05)" },
+  timelineAmountPill: { display: "inline-flex", alignItems: "center", maxWidth: "100%", padding: "4px 10px", borderRadius: 9999, background: "#eff6ff", color: "#1d4ed8", fontSize: 11, fontWeight: 700, overflowWrap: "anywhere", wordBreak: "break-word", whiteSpace: "normal" },
   modalBackdrop: { position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 },
   modalCard: { background: "#ffffff", borderRadius: 16, width: "100%", maxWidth: 380, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", padding: 24 },
   modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
