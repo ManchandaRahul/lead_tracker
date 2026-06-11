@@ -41,7 +41,6 @@ export default async function handler(req, res) {
     const isRootPasswordAdmin =
       requester?.role === "admin" &&
       requester?.username === "admin" &&
-      requester?.displayName === "admin" &&
       requester?.email === "admin@leadtracker.app";
 
     if (!isSelfChange && !isRootPasswordAdmin) {
