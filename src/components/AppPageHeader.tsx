@@ -1,6 +1,7 @@
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import AppHeaderNav from "./AppHeaderNav";
 import { Page } from "../navigation";
+import ChangePasswordModal from "./ChangePasswordModal";
 
 export default function AppPageHeader({
   current,
@@ -17,21 +18,39 @@ export default function AppPageHeader({
   showAdminBadge?: boolean;
   bottomContent?: ReactNode;
 }) {
+  const sessionUser = JSON.parse(localStorage.getItem("leadUser") || "{}");
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+
   return (
-    <div style={S.header}>
-      <div style={S.headerTop}>
-        <div style={S.headerBrandGroup}>
-          <div style={S.headerLeft}>
-            <img src="/k1.svg" alt="Karuyaki Logo" style={{ height: 36 }} />
-            <h1 style={S.headerTitle}>Lead Tracker</h1>
-            {showAdminBadge && <span style={S.adminBadge}>Admin Only</span>}
+    <>
+      <div style={S.header}>
+        <div style={S.headerTop}>
+          <div style={S.headerBrandGroup}>
+            <div style={S.headerLeft}>
+              <img src="/k1.svg" alt="Karuyaki Logo" style={{ height: 36 }} />
+              <h1 style={S.headerTitle}>Lead Tracker</h1>
+              {showAdminBadge && <span style={S.adminBadge}>Admin Only</span>}
+            </div>
+            <AppHeaderNav current={current} onNavigate={onNavigate} isAdmin={isAdmin} />
           </div>
-          <AppHeaderNav current={current} onNavigate={onNavigate} isAdmin={isAdmin} />
+          <div style={S.headerActions}>
+            <button onClick={() => setShowPasswordModal(true)} style={S.btnSecondary}>
+              Change Password
+            </button>
+            <button onClick={onLogout} style={S.btnLogout}>Logout</button>
+          </div>
         </div>
-        <button onClick={onLogout} style={S.btnLogout}>Logout</button>
+        {bottomContent ? <div style={S.headerBottom}>{bottomContent}</div> : null}
       </div>
-      {bottomContent ? <div style={S.headerBottom}>{bottomContent}</div> : null}
-    </div>
+      <ChangePasswordModal
+        open={showPasswordModal}
+        onClose={() => setShowPasswordModal(false)}
+        targetUid={sessionUser.uid || ""}
+        targetLabel={sessionUser.username || "Current User"}
+        actorName={sessionUser.username || "unknown"}
+        isSelf
+      />
+    </>
   );
 }
 
@@ -89,6 +108,24 @@ const S: Record<string, React.CSSProperties> = {
     borderRadius: 6,
     border: "1px solid #ddd6fe",
     whiteSpace: "nowrap",
+  },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "nowrap",
+  },
+  btnSecondary: {
+    padding: "10px 14px",
+    background: "#fff",
+    color: "#0f172a",
+    border: "1px solid #d7dee8",
+    borderRadius: 12,
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
   },
   btnLogout: {
     padding: "10px 14px",

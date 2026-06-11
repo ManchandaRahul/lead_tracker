@@ -4,6 +4,7 @@ import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { auth, db } from "../firebase/config";
 import { logActivity } from "../firebase/activityLog";
 import AppPageHeader from "../components/AppPageHeader";
+import ChangePasswordModal from "../components/ChangePasswordModal";
 import { Page } from "../navigation";
 
 type AppUser = {
@@ -30,6 +31,9 @@ const EMPTY_USER_FORM = {
 export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: string) => void }) {
   const sessionUser = JSON.parse(localStorage.getItem("leadUser")!);
   const isAdmin = sessionUser.role === "admin";
+  const isRootPasswordAdmin =
+    sessionUser.username === "admin" &&
+    sessionUser.email === "admin@leadtracker.app";
   const logout = () => { signOut(auth); localStorage.removeItem("leadUser"); window.location.reload(); };
 
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -38,6 +42,7 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [formData, setFormData] = useState({ ...EMPTY_USER_FORM });
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [passwordTarget, setPasswordTarget] = useState<AppUser | null>(null);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -98,8 +103,8 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
         throw new Error(payload?.error || "Failed to create user.");
       }
 
-      await logActivity(payload.uid, formData.displayName.trim() || formData.username.trim(), "leads", {
-        actionType: "LEAD_EDITED",
+      await logActivity(payload.uid, formData.displayName.trim() || formData.username.trim(), "users", {
+        actionType: "USER_CREATED",
         description: `User "${formData.username.trim()}" was created with role "${formData.role}"`,
         actionBy: sessionUser.username,
         timestamp: new Date().toISOString(),
@@ -141,6 +146,28 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to update user.");
+      }
+
+      if (updates.role && updates.role !== user.role) {
+        await logActivity(user.uid || user.id, user.displayName || user.username, "users", {
+          actionType: "USER_ROLE_CHANGED",
+          description: `User "${user.username}" role changed from "${user.role}" to "${updates.role}".`,
+          previousValue: user.role,
+          newValue: updates.role,
+          actionBy: sessionUser.username,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      if (updates.status && updates.status !== (user.status || "active")) {
+        await logActivity(user.uid || user.id, user.displayName || user.username, "users", {
+          actionType: "USER_STATUS_CHANGED",
+          description: `User "${user.username}" status changed from "${user.status || "active"}" to "${updates.status}".`,
+          previousValue: user.status || "active",
+          newValue: updates.status,
+          actionBy: sessionUser.username,
+          timestamp: new Date().toISOString(),
+        });
       }
 
       setMessage({ type: "success", text: `User "${user.username}" updated successfully.` });
@@ -280,9 +307,16 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
                     </select>
                   </td>
                   <td style={S.tdSticky}>
-                    <span style={{ fontSize: 12, color: "#64748b" }}>
-                      UID: {user.uid || user.id}
-                    </span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {isRootPasswordAdmin && (
+                        <button onClick={() => setPasswordTarget(user)} style={S.passwordBtn}>
+                          Change Password
+                        </button>
+                      )}
+                      <span style={{ fontSize: 12, color: "#64748b" }}>
+                        UID: {user.uid || user.id}
+                      </span>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -290,6 +324,17 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
           </table>
         </div>
       </div>
+
+      {passwordTarget && (
+        <ChangePasswordModal
+          open={!!passwordTarget}
+          onClose={() => setPasswordTarget(null)}
+          targetUid={passwordTarget.uid || passwordTarget.id}
+          targetLabel={passwordTarget.displayName || passwordTarget.username}
+          actorName={sessionUser.username}
+          isSelf={(passwordTarget.uid || passwordTarget.id) === (sessionUser.uid || "")}
+        />
+      )}
     </div>
   );
 }
@@ -324,4 +369,5 @@ const S: Record<string, React.CSSProperties> = {
   td: { padding: "11px 14px", color: "#334155", verticalAlign: "middle", fontSize: 13 },
   tdSticky: { padding: "11px 14px", color: "#334155", verticalAlign: "middle", fontSize: 13, position: "sticky", right: 0, background: "#ffffff", zIndex: 1, boxShadow: "-2px 0 6px rgba(0,0,0,0.06)" },
   inlineSelect: { padding: "7px 10px", borderRadius: 8, border: "1.5px solid #e2e8f0", fontSize: 13, background: "#f8fafc", outline: "none", color: "#0f172a" },
+  passwordBtn: { padding: "6px 10px", background: "#eff6ff", color: "#2563eb", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 12, textAlign: "left" },
 };

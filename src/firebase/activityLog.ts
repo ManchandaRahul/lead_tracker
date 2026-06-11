@@ -8,7 +8,11 @@ export type ActivityAction =
   | "LEAD_DELETED"
   | "TXN_ADDED"
   | "TXN_EDITED"
-  | "TXN_DELETED";
+  | "TXN_DELETED"
+  | "USER_CREATED"
+  | "USER_ROLE_CHANGED"
+  | "USER_STATUS_CHANGED"
+  | "USER_PASSWORD_CHANGED";
 
 export interface HistoryEntry {
   actionType: ActivityAction;
@@ -22,7 +26,7 @@ export interface HistoryEntry {
 export interface ActivityDocument {
   referenceId: string;       // leadId or transactionId — also used as Firestore doc ID
   referenceName: string;     // accountName for display
-  module: "leads" | "transactions";
+  module: "leads" | "transactions" | "users";
   history: HistoryEntry[];
   lastUpdated: string;
   lastActionBy: string;
@@ -31,7 +35,7 @@ export interface ActivityDocument {
 export async function logActivity(
   referenceId: string,
   referenceName: string,
-  module: "leads" | "transactions",
+  module: "leads" | "transactions" | "users",
   entry: HistoryEntry
 ) {
   try {

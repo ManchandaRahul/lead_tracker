@@ -1,4 +1,4 @@
-import React, { useEffect, useState, Fragment } from "react";
+import React, { useEffect, useRef, useState, Fragment } from "react";
 import { db } from "../firebase/config";
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { logActivity } from "../firebase/activityLog";
@@ -102,8 +102,75 @@ function generateActivityId() {
   return `ACT_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"00")}${String(d.getDate()).padStart(2,"00")}_${Math.floor(Math.random()*9000+1000)}`;
 }
 
+function generateLeadId() {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}_LEAD_${Math.floor(Math.random() * 9000 + 1000)}`;
+}
+
 function generateTimelineId() {
   return `TL_${Date.now()}_${Math.floor(Math.random() * 9000 + 1000)}`;
+}
+
+function normalizeImportHeader(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s/]/g, "");
+}
+
+function normalizeMatchValue(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function parseImportedActivityDate(value: unknown) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!value) return today;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return today;
+  const firstLine = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) return today;
+
+  const cleaned = firstLine
+    .replace(/^week of\s+/i, "")
+    .replace(/(\d+)(st|nd|rd|th)/gi, "$1")
+    .trim();
+
+  const currentYear = new Date().getFullYear();
+  const parsed = new Date(`${cleaned} ${currentYear}`);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  return today;
+}
+
+function deriveImportedStage(...texts: string[]) {
+  const haystack = texts.join(" ").toLowerCase();
+  if (/completed|complete|go live|go-live|running as required|completed successfully/.test(haystack)) return "Completed";
+  if (/on hold|hold currently/.test(haystack)) return "On Hold";
+  if (/review/.test(haystack)) return "Review";
+  if (/kickoff/.test(haystack)) return "Kickoff";
+  if (/call|discussion|proposal|follow up|follow-up|schedule|scheduled/.test(haystack)) return "Initial Call";
+  return "In Progress";
+}
+
+function deriveImportedActivityName(_statusText: string, projectName: string, clientName: string) {
+  const compactProject = String(projectName || "").replace(/\s+/g, " ").trim();
+  if (compactProject) return compactProject.length > 90 ? `${compactProject.slice(0, 87).trimEnd()}…` : compactProject;
+  return `Imported activity for ${clientName}`;
 }
 
 const DEAL_PIPELINE_STAGES = [
@@ -145,6 +212,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const [editingId, setEditingId]   = useState<string | null>(null);
   const [search, setSearch]         = useState("");
   const [stageFilter, setStageFilter] = useState("All");
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<string | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ activity: Activity } | null>(null);
   const [showColModal, setShowColModal] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
@@ -170,6 +239,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const [actionDescription, setActionDescription] = useState("");
   const [actionDate, setActionDate] = useState(new Date().toISOString().slice(0, 10));
   const [timelineFilter, setTimelineFilter] = useState<"all" | TimelineCategory>("all");
+  const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, "transactions"), (snap) => {
@@ -191,6 +261,22 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     leadId: routeLeadId || "",
     accountName: selectedLead?.accountName || "",
   });
+
+  useEffect(() => {
+    if (!isLeadWorkspace || !selectedLead || loading) return;
+    if (scopedActivities.length > 0) return;
+    if (showForm || editingId || actionActivityId) return;
+    setShowForm(true);
+    setFormData(buildEmptyActivity());
+  }, [
+    actionActivityId,
+    editingId,
+    isLeadWorkspace,
+    loading,
+    scopedActivities.length,
+    selectedLead,
+    showForm,
+  ]);
 
   const handleLeadSelect = (leadId: string) => {
     const lead = leads.find(l => l.leadId === leadId);
@@ -1614,6 +1700,141 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     XLSX.writeFile(wb, `Activities_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    setImportResult(null);
+
+    try {
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { cellDates: true });
+      const preferredSheetName = wb.SheetNames.find((name) => name.toLowerCase().includes("working - projects"));
+      const ws = wb.Sheets[preferredSheetName || wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
+      const workingLeads = [...leads];
+      let leadCreateCount = 0;
+      let activityCreateCount = 0;
+
+      for (const row of rows) {
+        const baseEntries = Object.entries(row).map(([column, value]) => [normalizeImportHeader(column), value] as const);
+        const normalizedRow: Record<string, any> = {};
+        const duplicateCounter: Record<string, number> = {};
+        for (const [header, value] of baseEntries) {
+          duplicateCounter[header] = (duplicateCounter[header] || 0) + 1;
+          const key = duplicateCounter[header] === 1 ? header : `${header}_${duplicateCounter[header]}`;
+          normalizedRow[key] = value;
+        }
+
+        const isWorkingProjectsSheet =
+          normalizedRow["client"] !== undefined ||
+          normalizedRow["spoc name"] !== undefined ||
+          normalizedRow["type of work"] !== undefined;
+
+        const clientName = String((isWorkingProjectsSheet ? normalizedRow["client"] : normalizedRow["client name"]) || "").trim();
+        const moduleType = String((isWorkingProjectsSheet ? normalizedRow["type of work"] : normalizedRow["pmc / pmccs"]) || "").trim();
+        const clientStatus = String((isWorkingProjectsSheet ? normalizedRow["status"] : normalizedRow["client status"]) || "").trim();
+        const projectName = String(normalizedRow["project"] || normalizedRow["project name"] || "").trim();
+        const statusText = String((isWorkingProjectsSheet ? normalizedRow["location"] : normalizedRow["status"]) || "").trim();
+        const activityText1 = String((isWorkingProjectsSheet ? normalizedRow["status"] : normalizedRow["activity"]) || "").trim();
+        const activityText2 = String((isWorkingProjectsSheet ? normalizedRow["activity"] : normalizedRow["activity_2"]) || "").trim();
+        const completionDateText = String(normalizedRow["completion date"] || "").trim();
+        const clientSpoc = String(normalizedRow["spoc name"] || "").trim();
+        const ownerText = String(normalizedRow["owner"] || "").trim();
+        const domainText = String(normalizedRow["domain"] || "").trim();
+        const extraNote = String(normalizedRow["location_2"] || "").trim();
+
+        const hasContent = [clientName, projectName, statusText, activityText1, activityText2, completionDateText].some(Boolean);
+        if (!hasContent || !clientName) continue;
+
+        const normalizedClient = normalizeMatchValue(clientName);
+        let matchedLead =
+          workingLeads.find((lead) => normalizeMatchValue(lead.accountName) === normalizedClient);
+
+        if (!matchedLead) {
+          const createdAt = new Date().toISOString();
+          const leadPayload = {
+            leadId: generateLeadId(),
+            leadDate: createdAt.slice(0, 10),
+            accountName: clientName,
+            programName: "",
+            projectId: projectName,
+            engagementName: domainText,
+            engagementType: moduleType,
+            clientSpoc,
+            clientSpocPosition: "",
+            clientEmail: "",
+            clientPhone: "",
+            partnerSpoc: "",
+            partnerSpocPosition: "",
+            partnerEmail: "",
+            partnerPhone: "",
+            status: "Active",
+            remarks: clientStatus ? `Imported from activity tracker. Client status: ${clientStatus}` : "Imported from activity tracker.",
+            createdAt,
+            updatedAt: createdAt,
+          };
+          const leadRef = await addDoc(collection(db, "leads"), leadPayload);
+          matchedLead = { id: leadRef.id, ...leadPayload } as Lead;
+          workingLeads.push(matchedLead);
+          leadCreateCount++;
+
+          await logActivity(matchedLead.leadId, matchedLead.accountName, "leads", {
+            actionType: "LEAD_ADDED",
+            description: `Lead "${matchedLead.accountName}" imported from activity tracker`,
+            actionBy: user.username,
+            timestamp: createdAt,
+          });
+        }
+
+        const createdAt = new Date().toISOString();
+        const notesParts = [
+          statusText && `Status: ${statusText}`,
+          activityText1 && `Activity Update 1: ${activityText1}`,
+          activityText2 && `Activity Update 2: ${activityText2}`,
+          completionDateText && `Completion date note: ${completionDateText}`,
+          clientStatus && `Client status: ${clientStatus}`,
+          moduleType && `Module: ${moduleType}`,
+          domainText && `Domain: ${domainText}`,
+          extraNote && `Additional Note: ${extraNote}`,
+        ].filter(Boolean);
+
+        const activityPayload = {
+          ...EMPTY_ACTIVITY,
+          transactionId: generateActivityId(),
+          leadId: matchedLead.leadId,
+          accountName: matchedLead.accountName,
+          activityName: deriveImportedActivityName(statusText, projectName, clientName),
+          activityDate: parseImportedActivityDate(completionDateText),
+          stage: deriveImportedStage(statusText, activityText1, activityText2, completionDateText),
+          handledBy: ownerText,
+          notes: notesParts.join("\n\n"),
+          actions: [] as TimelineEntry[],
+          createdAt,
+          updatedAt: createdAt,
+        };
+
+        await addDoc(collection(db, "transactions"), activityPayload);
+        await logActivity(activityPayload.transactionId, activityPayload.accountName, "transactions", {
+          actionType: "TXN_ADDED",
+          description: `Activity "${activityPayload.activityName}" imported from activity tracker`,
+          actionBy: user.username,
+          timestamp: createdAt,
+        });
+        activityCreateCount++;
+      }
+
+      setImportResult(`✅ Imported ${activityCreateCount} activit${activityCreateCount === 1 ? "y" : "ies"} and created ${leadCreateCount} new lead${leadCreateCount === 1 ? "" : "s"}.`);
+    } catch (error) {
+      console.error("Activity import failed:", error);
+      setImportResult("❌ Import failed. Check the activity tracker format.");
+    } finally {
+      setImporting(false);
+      if (importRef.current) importRef.current.value = "";
+    }
+  };
+
   const stats = STAGES.map(s => ({
     stage: s,
     count: scopedActivities.filter(a => a.stage === s).length,
@@ -1662,6 +1883,22 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         isAdmin={isAdmin}
         onLogout={logout}
       />
+
+      {importResult && (
+        <div style={{
+          padding: "10px 24px",
+          background: importResult.startsWith("✅") ? "#f0fdf4" : "#fef2f2",
+          color: importResult.startsWith("✅") ? "#16a34a" : "#dc2626",
+          fontSize: 13,
+          borderBottom: "1px solid #e2e8f0",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}>
+          {importResult}
+          <button onClick={() => setImportResult(null)} style={{ marginLeft: 12, background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 700 }}>×</button>
+        </div>
+      )}
 
       {isLeadWorkspace && selectedLead && (
         <div style={S.leadInfoWrap}>
@@ -1722,6 +1959,17 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             <option value="All">All Stages</option>
             {STAGES.map(s => <option key={s}>{s}</option>)}
           </select>
+          <label style={S.btnOutline}>
+            {importing ? "Importing Activities..." : "Import Activities Excel"}
+            <input
+              ref={importRef}
+              type="file"
+              accept=".xlsx,.xls"
+              style={{ display: "none" }}
+              onChange={handleImport}
+              disabled={importing}
+            />
+          </label>
           <button onClick={downloadExcel} style={S.btnDark}>Export Excel</button>
           <button onClick={() => setShowColModal(true)} style={S.btnOutline}>Columns</button>
           <button

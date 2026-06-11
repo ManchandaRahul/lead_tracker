@@ -3,6 +3,34 @@ import { Page } from "../navigation";
 
 type MenuKey = "reporting" | null;
 
+const TAB_HELP: Partial<Record<Page, string>> = {
+  leads: "View and manage all client leads.\nTrack lead details and current status.",
+  transactions: "Open activities for follow-ups and actions.\nManage notes, calls, meetings, and deals.",
+  deals: "Review the deal pipeline and reporting.\nTrack stage-wise progress, wins, and losses.",
+  activity: "Review the admin audit history.\nSee what changed, who changed it, and when.",
+};
+
+function NavHelpButton({
+  helpText,
+  children,
+}: {
+  helpText?: string;
+  children: React.ReactNode;
+}) {
+  const [showHelp, setShowHelp] = useState(false);
+
+  return (
+    <div
+      style={S.helpWrap}
+      onMouseEnter={() => setShowHelp(!!helpText)}
+      onMouseLeave={() => setShowHelp(false)}
+    >
+      {children}
+      {showHelp && helpText && <div style={S.helpBubble}>{helpText}</div>}
+    </div>
+  );
+}
+
 export default function AppHeaderNav({
   current,
   onNavigate,
@@ -40,53 +68,61 @@ export default function AppHeaderNav({
 
   return (
     <div style={S.navTabs} ref={menuRef}>
-      <button
-        type="button"
-        onClick={() => navigateTo("leads")}
-        style={{ ...S.navTab, ...(current === "leads" ? S.navTabActive : {}) }}
-      >
-        Leads
-      </button>
-
-      <button
-        type="button"
-        onClick={() => navigateTo("transactions")}
-        style={{ ...S.navTab, ...(actActive ? S.navTabActive : {}) }}
-      >
-        Act
-      </button>
-
-      <div style={S.menuWrap}>
+      <NavHelpButton helpText={TAB_HELP.leads}>
         <button
           type="button"
-          onClick={() => toggleMenu("reporting")}
-          style={{ ...S.navTab, ...(reportingActive ? S.navTabActive : {}) }}
+          onClick={() => navigateTo("leads")}
+          style={{ ...S.navTab, ...(current === "leads" ? S.navTabActive : {}) }}
         >
-          Reporting
-          <span style={S.caret}>▼</span>
+          Leads
         </button>
-        {openMenu === "reporting" && (
-          <div style={S.menu}>
-            <button
-              type="button"
-              onClick={() => navigateTo("deals")}
-              style={{ ...S.menuItem, ...(current === "deals" ? S.menuItemActive : {}) }}
-            >
-              Deals
-            </button>
-          </div>
-        )}
-      </div>
+      </NavHelpButton>
+
+      <NavHelpButton helpText={TAB_HELP.transactions}>
+        <button
+          type="button"
+          onClick={() => navigateTo("transactions")}
+          style={{ ...S.navTab, ...(actActive ? S.navTabActive : {}) }}
+        >
+          Act
+        </button>
+      </NavHelpButton>
+
+      <NavHelpButton helpText={TAB_HELP.deals}>
+        <div style={S.menuWrap}>
+          <button
+            type="button"
+            onClick={() => toggleMenu("reporting")}
+            style={{ ...S.navTab, ...(reportingActive ? S.navTabActive : {}) }}
+          >
+            Reporting
+            <span style={S.caret}>▼</span>
+          </button>
+          {openMenu === "reporting" && (
+            <div style={S.menu}>
+              <button
+                type="button"
+                onClick={() => navigateTo("deals")}
+                style={{ ...S.menuItem, ...(current === "deals" ? S.menuItemActive : {}) }}
+              >
+                Deals
+              </button>
+            </div>
+          )}
+        </div>
+      </NavHelpButton>
 
       {isAdmin && (
         <>
-          <button
-            type="button"
-            onClick={() => navigateTo("activity")}
-            style={{ ...S.navTab, ...(current === "activity" ? S.navTabActive : {}) }}
-          >
-            Activity Log
-          </button>
+          <NavHelpButton helpText={TAB_HELP.activity}>
+            <button
+              type="button"
+              onClick={() => navigateTo("activity")}
+              style={{ ...S.navTab, ...(current === "activity" ? S.navTabActive : {}) }}
+            >
+              Activity Log
+            </button>
+          </NavHelpButton>
           <button
             type="button"
             onClick={() => navigateTo("users")}
@@ -134,6 +170,29 @@ const S: Record<string, React.CSSProperties> = {
   },
   menuWrap: {
     position: "relative",
+  },
+  helpWrap: {
+    position: "relative",
+    display: "inline-flex",
+  },
+  helpBubble: {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    left: "50%",
+    transform: "translateX(-50%)",
+    minWidth: 220,
+    maxWidth: 260,
+    padding: "10px 12px",
+    borderRadius: 12,
+    background: "#0f172a",
+    color: "#ffffff",
+    fontSize: 12,
+    lineHeight: 1.45,
+    whiteSpace: "pre-line",
+    textAlign: "left",
+    boxShadow: "0 14px 30px rgba(15,23,42,0.24)",
+    zIndex: 80,
+    pointerEvents: "none",
   },
   menu: {
     position: "absolute",

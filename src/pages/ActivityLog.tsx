@@ -14,6 +14,10 @@ const ACTION_META: Record<string, { label: string; bg: string; color: string }> 
   TXN_ADDED: { label: "Txn Added", bg: "#fef9c3", color: "#b45309" },
   TXN_EDITED: { label: "Txn Edited", bg: "#dbeafe", color: "#1d4ed8" },
   TXN_DELETED: { label: "Txn Deleted", bg: "#fee2e2", color: "#dc2626" },
+  USER_CREATED: { label: "User Created", bg: "#dcfce7", color: "#15803d" },
+  USER_ROLE_CHANGED: { label: "User Role Changed", bg: "#ede9fe", color: "#7c3aed" },
+  USER_STATUS_CHANGED: { label: "User Status Changed", bg: "#dbeafe", color: "#2563eb" },
+  USER_PASSWORD_CHANGED: { label: "Password Changed", bg: "#fef3c7", color: "#b45309" },
 };
 
 export default function ActivityLog({ onNavigate }: { onNavigate: (p: Page, leadId?: string) => void }) {
@@ -121,6 +125,7 @@ export default function ActivityLog({ onNavigate }: { onNavigate: (p: Page, lead
           <option value="All">All Modules</option>
           <option value="leads">Leads</option>
           <option value="transactions">Transactions</option>
+          <option value="users">Users</option>
         </select>
         <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)} style={S.select}>
           <option value="All">All Actions</option>
@@ -210,8 +215,8 @@ export default function ActivityLog({ onNavigate }: { onNavigate: (p: Page, lead
                       <td style={{ ...S.td, fontWeight: 600, whiteSpace: "nowrap", color: "#0f172a" }}>{log.referenceId}</td>
                       <td style={{ ...S.td, fontWeight: 600, minWidth: 160 }}>{log.referenceName}</td>
                       <td style={S.td}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: log.module === "leads" ? "#2563eb" : "#b45309" }}>
-                          {log.module === "leads" ? "Leads" : "Transactions"}
+                        <span style={{ fontSize: 12, fontWeight: 600, color: log.module === "leads" ? "#2563eb" : log.module === "transactions" ? "#b45309" : "#7c3aed" }}>
+                          {log.module === "leads" ? "Leads" : log.module === "transactions" ? "Transactions" : "Users"}
                         </span>
                       </td>
                       <td style={{ ...S.td, textAlign: "center" }}>

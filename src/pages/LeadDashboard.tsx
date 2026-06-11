@@ -14,6 +14,7 @@ import { auth } from "../firebase/config";
 import * as XLSX from "xlsx";
 import DeleteModal from "../components/DeleteModal";
 import AppHeaderNav from "../components/AppHeaderNav";
+import ChangePasswordModal from "../components/ChangePasswordModal";
 import { Page } from "../navigation";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -49,6 +50,12 @@ const EMPTY_LEAD = {
 };
 
 type Lead = typeof EMPTY_LEAD & { id: string; createdAt?: string };
+type LeadTransactionRef = {
+  leadId: string;
+  transactionId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
 
 // ─── Excel column → field mapping ────────────────────────────────────────────
 const EXCEL_MAP: Record<string, keyof typeof EMPTY_LEAD> = {
@@ -143,9 +150,10 @@ function Tooltip({ text }: { text: string }) {
 export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, leadId?: string) => void }) {
   const user    = JSON.parse(localStorage.getItem("leadUser")!);
   const isAdmin = user.role === "admin";
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
 
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [transactions, setTransactions] = useState<{leadId:string}[]>([]);
+  const [transactions, setTransactions] = useState<LeadTransactionRef[]>([]);
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -176,10 +184,34 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       setLoading(false);
     });
     const unsubTxn = onSnapshot(collection(db, "transactions"), (snap) => {
-      setTransactions(snap.docs.map(d => ({ leadId: d.data().leadId })));
+      setTransactions(
+        snap.docs.map((d) => ({
+          leadId: d.data().leadId,
+          transactionId: d.data().transactionId || d.id,
+          createdAt: d.data().createdAt,
+          updatedAt: d.data().updatedAt,
+        }))
+      );
     });
     return () => { unsub(); unsubTxn(); };
   }, []);
+
+  const openLeadActions = (lead: Lead) => {
+    const relatedTransactions = transactions
+      .filter((transaction) => transaction.leadId === lead.leadId)
+      .sort((a, b) => {
+        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return bTime - aTime;
+      });
+
+    if (relatedTransactions.length > 0) {
+      onNavigate("activityDetail", relatedTransactions[0].transactionId);
+      return;
+    }
+
+    onNavigate("transactions", lead.leadId);
+  };
 
   // ── Filtered + sorted leads ──
   const filtered = leads
@@ -438,7 +470,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             </div>
             <AppHeaderNav current="leads" onNavigate={onNavigate} isAdmin={isAdmin} />
           </div>
-          <button onClick={logout} style={S.btnLogout}>Logout</button>
+          <div style={S.headerActions}>
+            <button onClick={() => setShowPasswordModal(true)} style={S.btnOutline}>Change Password</button>
+            <button onClick={logout} style={S.btnLogout}>Logout</button>
+          </div>
         </div>
       </div>
 
@@ -491,7 +526,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           </select>
           <button onClick={() => setShowColModal(true)} style={S.btnOutline}>Columns</button>
           <label style={S.btnOutline}>
-            {importing ? "Importing..." : "Import Excel"}
+            {importing ? "Importing Leads..." : "Import Leads Excel"}
             <input
               ref={importRef}
               type="file"
@@ -685,7 +720,17 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
                   {visibleCols["Lead Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{lead.leadDate || "-"}</td>}
-                  {visibleCols["Client Name"] && <td style={{ ...S.tdClientSticky, fontWeight: 600, minWidth: 140 }}>{lead.accountName}</td>}
+                  {visibleCols["Client Name"] && (
+                    <td style={{ ...S.tdClientSticky, minWidth: 140 }}>
+                      <button
+                        type="button"
+                        onClick={() => openLeadActions(lead)}
+                        style={S.clientLinkBtn}
+                      >
+                        {lead.accountName}
+                      </button>
+                    </td>
+                  )}
                   {visibleCols["Program Name"] && <td style={{ ...S.td, minWidth: 140 }}>{(lead as any).programName || "-"}</td>}
                   {visibleCols["Project Name"] && <td style={S.td}>{lead.projectId}</td>}
                   {visibleCols["Engagement Name"] && <td style={{ ...S.td, minWidth: 160 }}>{lead.engagementName}</td>}
@@ -795,6 +840,15 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           onCancel={() => setDeleteModal(null)}
         />
       )}
+
+      <ChangePasswordModal
+        open={showPasswordModal}
+        onClose={() => setShowPasswordModal(false)}
+        targetUid={user.uid || ""}
+        targetLabel={user.username || "Current User"}
+        actorName={user.username || "unknown"}
+        isSelf
+      />
     </div>
   );
 }
@@ -820,6 +874,7 @@ const S: Record<string, React.CSSProperties> = {
   },
   headerTop: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "nowrap" },
   headerBrandGroup: { display: "flex", alignItems: "center", gap: 20, minWidth: 0, flex: 1 },
+  headerActions: { display: "flex", alignItems: "center", gap: 10, flexWrap: "nowrap" },
   headerBottom: { display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" },
   headerLeft: { display: "flex", alignItems: "center", gap: 12 },
   headerTitle: { fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: "-0.5px", color: "#0f172a" },
@@ -1073,6 +1128,17 @@ const S: Record<string, React.CSSProperties> = {
     background: "#ffffff",
     zIndex: 2,
     boxShadow: "2px 0 6px rgba(0,0,0,0.06)",
+  },
+  clientLinkBtn: {
+    background: "none",
+    border: "none",
+    padding: 0,
+    margin: 0,
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+    textAlign: "left",
   },
   tr: {
     borderBottom: "1px solid #f1f5f9",
