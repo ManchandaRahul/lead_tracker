@@ -232,7 +232,12 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     })
     .sort((a, b) => {
       const order: Record<string, number> = { Active: 1, Inactive: 2 };
-      return (order[a.status] ?? 9) - (order[b.status] ?? 9);
+      const statusDiff = (order[a.status] ?? 9) - (order[b.status] ?? 9);
+      if (statusDiff !== 0) return statusDiff;
+
+      const aCreated = new Date(a.createdAt || 0).getTime();
+      const bCreated = new Date(b.createdAt || 0).getTime();
+      return bCreated - aCreated;
     });
 
   // ── Add / Edit lead ──
