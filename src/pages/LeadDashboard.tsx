@@ -478,7 +478,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   // ── Stats ──
   const stats = STATUSES.map((s) => ({
     status: s,
-    count: leads.filter((l) => l.status === s).length,
+    count: visibleLeads.filter((l) => l.status === s).length,
   }));
 
   // ── Loading state ──
@@ -531,7 +531,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       {/* ── Stats bar ── */}
       <div style={S.statsBar}>
         <div style={S.statTotal}>
-          <span style={S.statNum}>{leads.length}</span>
+          <span style={S.statNum}>{visibleLeads.length}</span>
           <span style={S.statLabel}>Total Leads</span>
         </div>
         {stats.map(({ status, count }) => (
