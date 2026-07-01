@@ -88,10 +88,12 @@ type Lead = {
   clientSpoc?: string;
   clientSpocPosition?: string;
   clientEmail?: string;
+  clientCountryCode?: string;
   clientPhone?: string;
   partnerSpoc?: string;
   partnerSpocPosition?: string;
   partnerEmail?: string;
+  partnerCountryCode?: string;
   partnerPhone?: string;
   status?: string;
   remarks?: string;
@@ -155,6 +157,45 @@ function parseImportedActivityDate(value: unknown) {
   }
 
   return today;
+}
+
+function normalizeActionText(value: string) {
+  const lines = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .split("\n");
+  const normalized: string[] = [];
+  for (const line of lines) {
+    const cleaned = line.replace(/\t/g, " ").replace(/[ ]{2,}/g, " ").trim();
+    if (!cleaned) {
+      if (normalized[normalized.length - 1] !== "") normalized.push("");
+      continue;
+    }
+    normalized.push(cleaned);
+  }
+  return normalized.join("\n").trim();
+}
+
+function handleNormalizedTextareaPaste(
+  event: React.ClipboardEvent<HTMLTextAreaElement>,
+  currentValue: string,
+  setValue: (value: string) => void
+) {
+  event.preventDefault();
+  const pasted = normalizeActionText(event.clipboardData.getData("text/plain"));
+  const target = event.currentTarget;
+  const start = target.selectionStart ?? currentValue.length;
+  const end = target.selectionEnd ?? currentValue.length;
+  const nextValue = `${currentValue.slice(0, start)}${pasted}${currentValue.slice(end)}`;
+  setValue(normalizeActionText(nextValue));
+}
+
+function formatPhoneWithCountryCode(countryCode?: string, phone?: string) {
+  const code = String(countryCode || "").trim();
+  const number = String(phone || "").trim();
+  if (!code) return number;
+  if (!number) return code;
+  return `${code} ${number}`;
 }
 
 function deriveImportedStage(...texts: string[]) {
@@ -299,7 +340,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         id: entry.id || `${createdAt}_${index}`,
         category,
         title: entry.title || entry.type || TIMELINE_META[category]?.label || "Update",
-        description: entry.description || "",
+        description: normalizeActionText(entry.description || ""),
         date: entry.date || createdAt.slice(0, 10),
         time: entry.time || "",
         place: entry.place || "",
@@ -317,7 +358,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     id: generateTimelineId(),
     category,
     title,
-    description,
+    description: normalizeActionText(description),
     date: overrides.date || new Date().toISOString().slice(0, 10),
     time: overrides.time || "",
     place: overrides.place || "",
@@ -1106,7 +1147,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             </div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 8, display: "block" }}>Description (Optional)</label>
-              <textarea value={rowActionDescription} onChange={e => setRowActionDescription(e.target.value)} rows={4} style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }} placeholder="Add details here..." />
+              <textarea value={rowActionDescription} onChange={e => setRowActionDescription(e.target.value)} onPaste={(e) => handleNormalizedTextareaPaste(e, rowActionDescription, setRowActionDescription)} rows={4} style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }} placeholder="Add details here..." />
             </div>
             <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => setRowActiveAction(null)} style={{ padding: "10px 24px", border: "none", background: "transparent", color: "#64748b", fontWeight: 600 }}>Cancel</button>
@@ -1165,8 +1206,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                             <span style={{ fontSize: 12, color: "#64748b" }}>{entry.date}{entry.time ? ` at ${entry.time}` : ""}</span>
                           </div>
                           <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: entry.description ? 4 : 0 }}>{entry.title}</div>
-                          {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0 }}>Place: {entry.place}</div>}
-                          {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45 }}>{entry.description}</div>}
+                          {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>Place: {entry.place}</div>}
+                          {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{entry.description}</div>}
                         </div>
                         <button type="button" onClick={() => setRowActionDeleteModal({ index: originalIndex, action: entry })} style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer" }} aria-label={`Delete ${entry.title}`}>
                           x
@@ -1531,6 +1572,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             <textarea
               value={actionDescription}
               onChange={e => setActionDescription(e.target.value)}
+              onPaste={(e) => handleNormalizedTextareaPaste(e, actionDescription, setActionDescription)}
               rows={4}
               style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }}
               placeholder="Add details here..."
@@ -1650,7 +1692,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                           </div>
                         )}
                         {entry.description && (
-                          <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45 }}>
+                          <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
                             {entry.description}
                           </div>
                         )}
@@ -1921,11 +1963,11 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               ["Client SPOC", selectedLead.clientSpoc],
               ["Client Designation", selectedLead.clientSpocPosition],
               ["Client Email", selectedLead.clientEmail],
-              ["Client Phone", selectedLead.clientPhone],
+              ["Client Phone", formatPhoneWithCountryCode(selectedLead.clientCountryCode, selectedLead.clientPhone)],
               ["Partner SPOC", selectedLead.partnerSpoc],
               ["Partner Designation", selectedLead.partnerSpocPosition],
               ["Partner Email", selectedLead.partnerEmail],
-              ["Partner Phone", selectedLead.partnerPhone],
+              ["Partner Phone", formatPhoneWithCountryCode(selectedLead.partnerCountryCode, selectedLead.partnerPhone)],
               ["Status", selectedLead.status],
               ["Remarks", selectedLead.remarks],
             ].map(([label, value]) => (
@@ -2477,12 +2519,12 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                                   {entry.title}
                                 </div>
                                 {entry.place && (
-                                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0 }}>
+                                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>
                                     Place: {entry.place}
                                   </div>
                                 )}
                                 {entry.description && (
-                                  <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45 }}>
+                                  <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
                                     {entry.description}
                                   </div>
                                 )}

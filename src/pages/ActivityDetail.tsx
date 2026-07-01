@@ -116,10 +116,12 @@ type Lead = {
   clientSpoc?: string;
   clientSpocPosition?: string;
   clientEmail?: string;
+  clientCountryCode?: string;
   clientPhone?: string;
   partnerSpoc?: string;
   partnerSpocPosition?: string;
   partnerEmail?: string;
+  partnerCountryCode?: string;
   partnerPhone?: string;
   status?: string;
   remarks?: string;
@@ -137,6 +139,45 @@ function expandDealStageText(value: string) {
     .replace(/Proposal s\.\.\./g, "Proposal sent");
 }
 
+function normalizeActionText(value: string) {
+  const lines = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .split("\n");
+  const normalized: string[] = [];
+  for (const line of lines) {
+    const cleaned = line.replace(/\t/g, " ").replace(/[ ]{2,}/g, " ").trim();
+    if (!cleaned) {
+      if (normalized[normalized.length - 1] !== "") normalized.push("");
+      continue;
+    }
+    normalized.push(cleaned);
+  }
+  return normalized.join("\n").trim();
+}
+
+function handleNormalizedTextareaPaste(
+  event: React.ClipboardEvent<HTMLTextAreaElement>,
+  currentValue: string,
+  setValue: (value: string) => void
+) {
+  event.preventDefault();
+  const pasted = normalizeActionText(event.clipboardData.getData("text/plain"));
+  const target = event.currentTarget;
+  const start = target.selectionStart ?? currentValue.length;
+  const end = target.selectionEnd ?? currentValue.length;
+  const nextValue = `${currentValue.slice(0, start)}${pasted}${currentValue.slice(end)}`;
+  setValue(normalizeActionText(nextValue));
+}
+
+function formatPhoneWithCountryCode(countryCode?: string, phone?: string) {
+  const code = String(countryCode || "").trim();
+  const number = String(phone || "").trim();
+  if (!code) return number;
+  if (!number) return code;
+  return `${code} ${number}`;
+}
+
 function formatDisplayDate(value?: string) {
   if (!value) return "";
   const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -150,14 +191,14 @@ function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
   return entries.map((entry, index) => {
     const category = (entry.category || entry.type?.toLowerCase?.() || "update") as TimelineCategory;
     const createdAt = entry.createdAt || entry.timestamp || new Date().toISOString();
-    return {
-      id: entry.id || `${createdAt}_${index}`,
-      category,
-      title: expandDealStageText(entry.title || entry.type || TIMELINE_META[category]?.label || "Update"),
-      description: expandDealStageText(entry.description || ""),
-      date: entry.date || createdAt.slice(0, 10),
-      time: entry.time || "",
-      place: expandDealStageText(entry.place || ""),
+      return {
+        id: entry.id || `${createdAt}_${index}`,
+        category,
+        title: expandDealStageText(entry.title || entry.type || TIMELINE_META[category]?.label || "Update"),
+        description: normalizeActionText(expandDealStageText(entry.description || "")),
+        date: entry.date || createdAt.slice(0, 10),
+        time: entry.time || "",
+        place: expandDealStageText(entry.place || ""),
       createdAt,
       createdBy: entry.createdBy || entry.actionBy || "",
       amount: entry.amount || "",
@@ -176,7 +217,7 @@ function createTimelineEntry(
     id: generateTimelineId(),
     category,
     title,
-    description,
+    description: normalizeActionText(description),
     date: overrides.date || new Date().toISOString().slice(0, 10),
     time: overrides.time || "",
     place: overrides.place || "",
@@ -811,11 +852,11 @@ export default function ActivityDetail({
                 ["Client SPOC", selectedLead.clientSpoc],
                 ["Client Designation", selectedLead.clientSpocPosition],
                 ["Client Email", selectedLead.clientEmail],
-                ["Client Phone", selectedLead.clientPhone],
+                ["Client Phone", formatPhoneWithCountryCode(selectedLead.clientCountryCode, selectedLead.clientPhone)],
                 ["Partner SPOC", selectedLead.partnerSpoc],
                 ["Partner Designation", selectedLead.partnerSpocPosition],
                 ["Partner Email", selectedLead.partnerEmail],
-                ["Partner Phone", selectedLead.partnerPhone],
+                ["Partner Phone", formatPhoneWithCountryCode(selectedLead.partnerCountryCode, selectedLead.partnerPhone)],
                 ["Status", selectedLead.status],
                 ["Remarks", selectedLead.remarks],
               ].map(([label, value]) => (
@@ -1125,7 +1166,14 @@ export default function ActivityDetail({
               )}
               <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
                 <input type="date" value={actionDate} onChange={(e) => setActionDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
-                <textarea rows={4} placeholder={`Describe this ${activeAction.toLowerCase()}...`} value={actionDescription} onChange={(e) => setActionDescription(e.target.value)} style={{ ...S.fInput, flex: 1, resize: "vertical" }} />
+                <textarea
+                  rows={4}
+                  placeholder={`Describe this ${activeAction.toLowerCase()}...`}
+                  value={actionDescription}
+                  onChange={(e) => setActionDescription(e.target.value)}
+                  onPaste={(e) => handleNormalizedTextareaPaste(e, actionDescription, setActionDescription)}
+                  style={{ ...S.fInput, flex: 1, resize: "vertical" }}
+                />
               </div>
               <div style={{ display: "flex", gap: 10 }}>
                 <button type="button" onClick={saveAction} style={S.btnPrimary}>Save {activeAction}</button>
@@ -1234,7 +1282,7 @@ export default function ActivityDetail({
                             )}
                             <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: entry.description ? 4 : 0, overflowWrap: "anywhere", wordBreak: "break-word" }}>{entry.title}</div>
                             {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, overflowWrap: "anywhere", wordBreak: "break-word" }}>Place: {entry.place}</div>}
-                            {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, overflowWrap: "anywhere", wordBreak: "break-word" }}>{entry.description}</div>}
+                            {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, overflowWrap: "anywhere", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>{entry.description}</div>}
                         </div>
                         <button type="button" onClick={() => setActionDeleteModal({ index: originalIndex, action: entry })} style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start" }}>×</button>
                       </div>

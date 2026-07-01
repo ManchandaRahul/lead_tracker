@@ -40,10 +40,12 @@ const EMPTY_LEAD = {
   clientSpoc: "",
   clientSpocPosition: "",
   clientEmail: "",
+  clientCountryCode: "",
   clientPhone: "",
   partnerSpoc: "",
   partnerSpocPosition: "",
   partnerEmail: "",
+  partnerCountryCode: "",
   partnerPhone: "",
   status: "Active",
   remarks: "",
@@ -72,6 +74,7 @@ const EXCEL_MAP: Record<string, keyof typeof EMPTY_LEAD> = {
   "Client Designation": "clientSpocPosition",
   "SPOC Position": "clientSpocPosition",
   "Client Email": "clientEmail",
+  "Client Country Code": "clientCountryCode",
   "Email Id": "clientEmail",
   "Client Phone": "clientPhone",
   "Phone Number": "clientPhone",
@@ -79,6 +82,7 @@ const EXCEL_MAP: Record<string, keyof typeof EMPTY_LEAD> = {
   "Partner Designation": "partnerSpocPosition",
   "Partner SPOC Position": "partnerSpocPosition",
   "Partner Email": "partnerEmail",
+  "Partner Country Code": "partnerCountryCode",
   "Partner Email Id": "partnerEmail",
   "Partner Phone": "partnerPhone",
   "Partner Phone Number": "partnerPhone",
@@ -113,6 +117,14 @@ function normalizeImportedDate(value: unknown) {
   }
 
   return raw;
+}
+
+function formatPhoneWithCountryCode(countryCode?: string, phone?: string) {
+  const code = String(countryCode || "").trim();
+  const number = String(phone || "").trim();
+  if (!code) return number;
+  if (!number) return code;
+  return `${code} ${number}`;
 }
 
 const NORMALIZED_EXCEL_MAP = Object.fromEntries(
@@ -248,14 +260,20 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     if (formData.clientEmail && !formData.clientEmail.includes("@")) {
       errors.clientEmail = "Please enter a valid email address containing @";
     }
-    if (formData.clientPhone && !/^\d+$/.test(formData.clientPhone)) {
-      errors.clientPhone = "Phone number must contain only digits";
+    if (formData.clientCountryCode && !/^\+?\d{1,4}$/.test(formData.clientCountryCode.trim())) {
+      errors.clientCountryCode = "Country code must be digits and may start with +";
+    }
+    if (formData.clientPhone && !/^[\d ]+$/.test(formData.clientPhone)) {
+      errors.clientPhone = "Phone number can contain digits and spaces only";
     }
     if (formData.partnerEmail && !formData.partnerEmail.includes("@")) {
       errors.partnerEmail = "Please enter a valid email address containing @";
     }
-    if (formData.partnerPhone && !/^\d+$/.test(formData.partnerPhone)) {
-      errors.partnerPhone = "Phone number must contain only digits";
+    if (formData.partnerCountryCode && !/^\+?\d{1,4}$/.test(formData.partnerCountryCode.trim())) {
+      errors.partnerCountryCode = "Country code must be digits and may start with +";
+    }
+    if (formData.partnerPhone && !/^[\d ]+$/.test(formData.partnerPhone)) {
+      errors.partnerPhone = "Phone number can contain digits and spaces only";
     }
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
@@ -357,11 +375,11 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       "Client SPOC":        (l) => l.clientSpoc,
       "Client Designation": (l) => l.clientSpocPosition,
       "Client Email":       (l) => l.clientEmail,
-      "Client Phone":       (l) => l.clientPhone,
+      "Client Phone":       (l) => formatPhoneWithCountryCode((l as any).clientCountryCode, l.clientPhone),
       "Partner SPOC":       (l) => l.partnerSpoc,
       "Partner Designation":(l) => l.partnerSpocPosition,
       "Partner Email":      (l) => l.partnerEmail,
-      "Partner Phone":      (l) => l.partnerPhone,
+      "Partner Phone":      (l) => formatPhoneWithCountryCode((l as any).partnerCountryCode, l.partnerPhone),
       "Status":             (l) => l.status,
       "Remarks":            (l) => l.remarks,
     };
@@ -619,6 +637,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   { label: "Name", key: "clientSpoc" },
                   { label: "Designation", key: "clientSpocPosition" },
                   { label: "Email", key: "clientEmail" },
+                  { label: "Country Code", key: "clientCountryCode" },
                   { label: "Phone", key: "clientPhone" },
                 ].map(({ label, key }) => (
                   <div key={key} style={S.formField}>
@@ -626,6 +645,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                     <input
                       style={{ ...S.fInput, borderColor: formErrors[key] ? "#ef4444" : "" }}
                       value={(formData as any)[key]}
+                      placeholder={key.includes("CountryCode") ? "+91" : undefined}
                       onChange={(e) => {
                         setFormData({ ...formData, [key]: e.target.value });
                         if (formErrors[key]) setFormErrors(p => ({ ...p, [key]: "" }));
@@ -645,6 +665,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   { label: "Name", key: "partnerSpoc" },
                   { label: "Designation", key: "partnerSpocPosition" },
                   { label: "Email", key: "partnerEmail" },
+                  { label: "Country Code", key: "partnerCountryCode" },
                   { label: "Phone", key: "partnerPhone" },
                 ].map(({ label, key }) => (
                   <div key={key} style={S.formField}>
@@ -652,6 +673,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                     <input
                       style={{ ...S.fInput, borderColor: formErrors[key] ? "#ef4444" : "" }}
                       value={(formData as any)[key]}
+                      placeholder={key.includes("CountryCode") ? "+91" : undefined}
                       onChange={(e) => {
                         setFormData({ ...formData, [key]: e.target.value });
                         if (formErrors[key]) setFormErrors(p => ({ ...p, [key]: "" }));
@@ -745,13 +767,13 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   {visibleCols["Client Email"] && <td style={{ ...S.td, color: "#2563eb" }}>
                     {lead.clientEmail ? <a href={`mailto:${lead.clientEmail}`} style={{ color: "#2563eb" }}>{lead.clientEmail}</a> : "-"}
                   </td>}
-                  {visibleCols["Client Phone"] && <td style={S.td}>{lead.clientPhone || "-"}</td>}
+                  {visibleCols["Client Phone"] && <td style={S.td}>{formatPhoneWithCountryCode((lead as any).clientCountryCode, lead.clientPhone) || "-"}</td>}
                   {visibleCols["Partner SPOC"] && <td style={S.td}>{lead.partnerSpoc}</td>}
                   {visibleCols["Partner Designation"] && <td style={S.td}>{lead.partnerSpocPosition}</td>}
                   {visibleCols["Partner Email"] && <td style={{ ...S.td, color: "#2563eb" }}>
                     {lead.partnerEmail ? <a href={`mailto:${lead.partnerEmail}`} style={{ color: "#2563eb" }}>{lead.partnerEmail}</a> : "-"}
                   </td>}
-                  {visibleCols["Partner Phone"] && <td style={S.td}>{lead.partnerPhone || "-"}</td>}
+                  {visibleCols["Partner Phone"] && <td style={S.td}>{formatPhoneWithCountryCode((lead as any).partnerCountryCode, lead.partnerPhone) || "-"}</td>}
                   {visibleCols["Status"] && <td style={S.td}>
                     <select value={lead.status} onChange={(e) => updateStatus(lead, e.target.value)}
                       style={{ ...S.statusSelect, background: STATUS_COLORS[lead.status]?.bg, color: STATUS_COLORS[lead.status]?.color }}>
