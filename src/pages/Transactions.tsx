@@ -8,6 +8,7 @@ import * as XLSX from "xlsx";
 import DeleteModal from "../components/DeleteModal";
 import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
+import { canAccessLead, getAllowedLeadIds, getSessionUser, isRestrictedUser } from "../accessControl";
 
 const STAGES = ["Initial Call", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
 
@@ -240,8 +241,10 @@ const TIMELINE_META: Record<TimelineCategory, { label: string; bg: string; color
 };
 
 export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: (p: Page, leadId?: string) => void; routeLeadId?: string | null }) {
-  const user    = JSON.parse(localStorage.getItem("leadUser")!);
+  const user    = getSessionUser();
   const isAdmin = user.role === "admin";
+  const restrictedLeadIds = getAllowedLeadIds(user);
+  const restrictedLeadSet = new Set(restrictedLeadIds);
   const logout  = () => { signOut(auth); localStorage.removeItem("leadUser"); window.location.reload(); };
 
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -293,9 +296,17 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     return () => { u1(); u2(); };
   }, []);
 
-  const selectedLead = routeLeadId ? leads.find((lead) => lead.leadId === routeLeadId) || null : null;
+  const visibleLeads = isRestrictedUser(user)
+    ? leads.filter((lead) => restrictedLeadSet.has(lead.leadId))
+    : leads;
+  const visibleActivities = isRestrictedUser(user)
+    ? activities.filter((activity) => restrictedLeadSet.has(activity.leadId || ""))
+    : activities;
+  const selectedLead = routeLeadId ? visibleLeads.find((lead) => lead.leadId === routeLeadId) || null : null;
   const isLeadWorkspace = !!routeLeadId;
-  const scopedActivities = routeLeadId ? activities.filter((activity) => activity.leadId === routeLeadId) : activities;
+  const scopedActivities = routeLeadId
+    ? visibleActivities.filter((activity) => activity.leadId === routeLeadId)
+    : visibleActivities;
 
   const buildEmptyActivity = () => ({
     ...EMPTY_ACTIVITY,
@@ -320,7 +331,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   ]);
 
   const handleLeadSelect = (leadId: string) => {
-    const lead = leads.find(l => l.leadId === leadId);
+    const lead = visibleLeads.find(l => l.leadId === leadId);
     setFormData(f => ({ ...f, leadId, accountName: lead?.accountName || "" }));
   };
 
@@ -1893,6 +1904,30 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     );
   }
 
+  if (isLeadWorkspace && routeLeadId && !canAccessLead(user, routeLeadId)) {
+    return (
+      <div style={S.page}>
+        <AppPageHeader
+          current="transactions"
+          onNavigate={onNavigate}
+          isAdmin={isAdmin}
+          onLogout={logout}
+        />
+        <div style={{ padding: "32px 24px" }}>
+          <div style={S.leadWorkspaceEmpty}>
+            <h2 style={{ margin: 0, fontSize: 22, color: "#0f172a" }}>Access denied</h2>
+            <p style={{ margin: 0, color: "#64748b", lineHeight: 1.6 }}>
+              This lead is not assigned to your account.
+            </p>
+            <button type="button" onClick={() => onNavigate("leads")} style={S.btnPrimary}>
+              Back to Leads
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (isLeadWorkspace && !selectedLead) {
     return (
       <div style={S.page}>
@@ -1982,7 +2017,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
 
       <div style={S.statsBar}>
         <div style={S.statTotal}>
-          <span style={S.statNum}>{activities.length}</span>
+          <span style={S.statNum}>{scopedActivities.length}</span>
           <span style={S.statLabel}>Total Activities</span>
         </div>
         {stats.map(({ stage, count }) => (
@@ -2051,7 +2086,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                 ) : (
                   <select style={S.fInput} value={formData.leadId} required onChange={e => handleLeadSelect(e.target.value)}>
                     <option value="">Select a Lead</option>
-                    {leads.map(l => <option key={l.leadId} value={l.leadId}>{l.leadId} — {l.accountName}</option>)}
+                    {visibleLeads.map(l => <option key={l.leadId} value={l.leadId}>{l.leadId} — {l.accountName}</option>)}
                   </select>
                 )}
               </div>

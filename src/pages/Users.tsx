@@ -6,6 +6,7 @@ import { logActivity } from "../firebase/activityLog";
 import AppPageHeader from "../components/AppPageHeader";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import { Page } from "../navigation";
+import { getSessionUser } from "../accessControl";
 
 type AppUser = {
   id: string;
@@ -13,23 +14,31 @@ type AppUser = {
   username: string;
   email: string;
   displayName?: string;
-  role: "admin" | "user";
+  role: "admin" | "user" | "restricted_user";
   status?: "active" | "inactive";
+  allowedLeadIds?: string[];
   createdAt?: any;
   updatedAt?: any;
+};
+
+type LeadOption = {
+  id: string;
+  leadId: string;
+  accountName: string;
 };
 
 const EMPTY_USER_FORM = {
   username: "",
   email: "",
   displayName: "",
-  role: "user" as "admin" | "user",
+  role: "user" as "admin" | "user" | "restricted_user",
   status: "active" as "active" | "inactive",
   temporaryPassword: "",
+  allowedLeadIds: [] as string[],
 };
 
 export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: string) => void }) {
-  const sessionUser = JSON.parse(localStorage.getItem("leadUser")!);
+  const sessionUser = getSessionUser();
   const isAdmin = sessionUser.role === "admin";
   const isRootPasswordAdmin =
     sessionUser.username === "admin" &&
@@ -37,12 +46,15 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
   const logout = () => { signOut(auth); localStorage.removeItem("leadUser"); window.location.reload(); };
 
   const [users, setUsers] = useState<AppUser[]>([]);
+  const [leads, setLeads] = useState<LeadOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [formData, setFormData] = useState({ ...EMPTY_USER_FORM });
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [passwordTarget, setPasswordTarget] = useState<AppUser | null>(null);
+  const [leadAccessTarget, setLeadAccessTarget] = useState<AppUser | null>(null);
+  const [leadAccessDraft, setLeadAccessDraft] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -61,7 +73,24 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
       }
     );
 
-    return () => unsubscribe();
+    const leadsQuery = query(collection(db, "leads"), orderBy("accountName"));
+    const unsubscribeLeads = onSnapshot(leadsQuery, (snap) => {
+      setLeads(
+        snap.docs.map((d) => {
+          const data = d.data() as LeadOption;
+          return {
+            id: d.id,
+            leadId: data.leadId,
+            accountName: data.accountName,
+          };
+        })
+      );
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeLeads();
+    };
   }, [isAdmin]);
 
   if (!isAdmin) return null;
@@ -94,11 +123,20 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
           role: formData.role,
           status: formData.status,
           temporaryPassword: formData.temporaryPassword,
+          allowedLeadIds: formData.role === "restricted_user" ? formData.allowedLeadIds : [],
           createdBy: sessionUser.username,
         }),
       });
 
-      const payload = await response.json();
+      const rawResponse = await response.text();
+      let payload: any = {};
+      if (rawResponse) {
+        try {
+          payload = JSON.parse(rawResponse);
+        } catch {
+          payload = { error: rawResponse };
+        }
+      }
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to create user.");
       }
@@ -124,6 +162,15 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
     setFormData((prev) => ({ ...prev, [key]: value }));
   };
 
+  const toggleFormLead = (leadId: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      allowedLeadIds: prev.allowedLeadIds.includes(leadId)
+        ? prev.allowedLeadIds.filter((id) => id !== leadId)
+        : [...prev.allowedLeadIds, leadId],
+    }));
+  };
+
   const updateUser = async (user: AppUser, updates: Partial<AppUser>) => {
     try {
       if (!auth.currentUser) {
@@ -140,10 +187,22 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
           uid: user.uid || user.id,
           role: updates.role || user.role,
           status: updates.status || user.status || "active",
+          allowedLeadIds:
+            (updates.role || user.role) === "restricted_user"
+              ? updates.allowedLeadIds ?? user.allowedLeadIds ?? []
+              : [],
         }),
       });
 
-      const payload = await response.json();
+      const rawResponse = await response.text();
+      let payload: any = {};
+      if (rawResponse) {
+        try {
+          payload = JSON.parse(rawResponse);
+        } catch {
+          payload = { error: rawResponse };
+        }
+      }
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to update user.");
       }
@@ -165,6 +224,15 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
           description: `User "${user.username}" status changed from "${user.status || "active"}" to "${updates.status}".`,
           previousValue: user.status || "active",
           newValue: updates.status,
+          actionBy: sessionUser.username,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      if (updates.allowedLeadIds) {
+        await logActivity(user.uid || user.id, user.displayName || user.username, "users", {
+          actionType: "USER_LEAD_ACCESS_CHANGED",
+          description: `Lead access updated for "${user.username}". ${updates.allowedLeadIds.length} lead(s) assigned.`,
           actionBy: sessionUser.username,
           timestamp: new Date().toISOString(),
         });
@@ -231,6 +299,7 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
                 <select style={S.fInput} value={formData.role} onChange={(e) => handleFieldChange("role", e.target.value)}>
                   <option value="user">User</option>
                   <option value="admin">Admin</option>
+                  <option value="restricted_user">Restricted User</option>
                 </select>
               </div>
               <div style={S.formField}>
@@ -245,6 +314,27 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
                 <input required type="password" style={S.fInput} value={formData.temporaryPassword} onChange={(e) => handleFieldChange("temporaryPassword", e.target.value)} />
               </div>
             </div>
+
+            {formData.role === "restricted_user" && (
+              <div style={S.leadPickerWrap}>
+                <div style={S.leadPickerHeader}>
+                  <div style={S.fLabel}>Select Allowed Leads</div>
+                  <div style={S.leadPickerHint}>{formData.allowedLeadIds.length} selected</div>
+                </div>
+                <div style={S.leadPickerGrid}>
+                  {leads.map((lead) => (
+                    <label key={lead.id} style={S.leadPickerItem}>
+                      <input
+                        type="checkbox"
+                        checked={formData.allowedLeadIds.includes(lead.leadId)}
+                        onChange={() => toggleFormLead(lead.leadId)}
+                      />
+                      <span>{lead.leadId} — {lead.accountName}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div style={{ padding: "0 24px 24px", display: "flex", gap: 10 }}>
               <button type="submit" style={S.btnPrimary} disabled={saving}>
@@ -289,11 +379,12 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
                   <td style={S.td}>
                     <select
                       value={user.role}
-                      onChange={(e) => updateUser(user, { role: e.target.value as "admin" | "user" })}
+                      onChange={(e) => updateUser(user, { role: e.target.value as "admin" | "user" | "restricted_user" })}
                       style={S.inlineSelect}
                     >
                       <option value="user">User</option>
                       <option value="admin">Admin</option>
+                      <option value="restricted_user">Restricted User</option>
                     </select>
                   </td>
                   <td style={S.td}>
@@ -308,6 +399,17 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
                   </td>
                   <td style={S.tdSticky}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {user.role === "restricted_user" && (
+                        <button
+                          onClick={() => {
+                            setLeadAccessTarget(user);
+                            setLeadAccessDraft(user.allowedLeadIds || []);
+                          }}
+                          style={S.accessBtn}
+                        >
+                          Manage Leads
+                        </button>
+                      )}
                       {isRootPasswordAdmin && (
                         <button onClick={() => setPasswordTarget(user)} style={S.passwordBtn}>
                           Change Password
@@ -335,6 +437,70 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
           isSelf={(passwordTarget.uid || passwordTarget.id) === (sessionUser.uid || "")}
         />
       )}
+
+      {leadAccessTarget && (
+        <div style={S.modalBackdrop}>
+          <div style={S.modalCard}>
+            <div style={S.modalHeader}>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#0f172a" }}>
+                Select Leads for {leadAccessTarget.username}
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setLeadAccessTarget(null);
+                  setLeadAccessDraft([]);
+                }}
+                style={S.closeBtn}
+              >
+                X
+              </button>
+            </div>
+            <div style={S.leadPickerGridModal}>
+              {leads.map((lead) => (
+                <label key={lead.id} style={S.leadPickerItem}>
+                  <input
+                    type="checkbox"
+                    checked={leadAccessDraft.includes(lead.leadId)}
+                    onChange={() =>
+                      setLeadAccessDraft((prev) =>
+                        prev.includes(lead.leadId)
+                          ? prev.filter((id) => id !== lead.leadId)
+                          : [...prev, lead.leadId]
+                      )
+                    }
+                  />
+                  <span>{lead.leadId} — {lead.accountName}</span>
+                </label>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 20 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setLeadAccessTarget(null);
+                  setLeadAccessDraft([]);
+                }}
+                style={S.btnOutline}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!leadAccessTarget) return;
+                  await updateUser(leadAccessTarget, { allowedLeadIds: leadAccessDraft });
+                  setLeadAccessTarget(null);
+                  setLeadAccessDraft([]);
+                }}
+                style={S.btnPrimary}
+              >
+                Save Lead Access
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -361,6 +527,12 @@ const S: Record<string, React.CSSProperties> = {
   formField: { display: "flex", flexDirection: "column" },
   fLabel: { fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 5 },
   fInput: { padding: "9px 12px", borderRadius: 8, border: "1.5px solid #e2e8f0", fontSize: 13, background: "#f8fafc", outline: "none", color: "#0f172a", width: "100%", boxSizing: "border-box" },
+  leadPickerWrap: { padding: "0 24px 24px" },
+  leadPickerHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 },
+  leadPickerHint: { fontSize: 12, color: "#64748b", fontWeight: 600 },
+  leadPickerGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 10, maxHeight: 220, overflowY: "auto", padding: 2 },
+  leadPickerGridModal: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 10, maxHeight: 320, overflowY: "auto", paddingRight: 4 },
+  leadPickerItem: { display: "flex", alignItems: "flex-start", gap: 8, padding: "10px 12px", border: "1px solid #e2e8f0", borderRadius: 10, background: "#f8fafc", fontSize: 13, color: "#334155", cursor: "pointer" },
   tableWrap: { overflowX: "auto", borderRadius: 12, border: "1px solid #e2e8f0", background: "#fff", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
   th: { padding: "12px 14px", textAlign: "left", background: "#f8fafc", color: "#475569", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0 },
@@ -370,4 +542,8 @@ const S: Record<string, React.CSSProperties> = {
   tdSticky: { padding: "11px 14px", color: "#334155", verticalAlign: "middle", fontSize: 13, position: "sticky", right: 0, background: "#ffffff", zIndex: 1, boxShadow: "-2px 0 6px rgba(0,0,0,0.06)" },
   inlineSelect: { padding: "7px 10px", borderRadius: 8, border: "1.5px solid #e2e8f0", fontSize: 13, background: "#f8fafc", outline: "none", color: "#0f172a" },
   passwordBtn: { padding: "6px 10px", background: "#eff6ff", color: "#2563eb", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 12, textAlign: "left" },
+  accessBtn: { padding: "6px 10px", background: "#f8fafc", color: "#0f172a", border: "1px solid #d7dee8", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 12, textAlign: "left" },
+  modalBackdrop: { position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 },
+  modalCard: { background: "#ffffff", borderRadius: 16, padding: 24, width: "100%", maxWidth: 760, boxShadow: "0 24px 60px rgba(0,0,0,0.2)" },
+  modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 18 },
 };

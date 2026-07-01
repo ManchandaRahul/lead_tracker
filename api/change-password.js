@@ -69,8 +69,13 @@ export default async function handler(req, res) {
     return sendJson(res, 200, { ok: true });
   } catch (error) {
     console.error("change-password error:", error);
+    const errorMessage =
+      error?.message ||
+      error?.errorInfo?.message ||
+      (typeof error === "string" ? error : JSON.stringify(error));
+    const errorCode = error?.code || error?.errorInfo?.code || "";
     return sendJson(res, 500, {
-      error: error?.message || "Failed to change password.",
+      error: errorCode ? `${errorMessage} (${errorCode})` : errorMessage || "Failed to change password.",
     });
   }
 }

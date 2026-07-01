@@ -7,8 +7,9 @@ type FirestoreUser = {
   uid?: string;
   username: string;
   email: string;
-  role: "admin" | "user";
+  role: "admin" | "user" | "restricted_user";
   status?: "active" | "inactive";
+  allowedLeadIds?: string[];
 };
 
 function getAuthErrorMessage(err: any) {
@@ -100,6 +101,7 @@ export default function Login() {
         role: match.role,
         uid: match.uid || userDoc.id,
         email: match.email,
+        allowedLeadIds: Array.isArray(match.allowedLeadIds) ? match.allowedLeadIds : [],
       }));
 
       window.location.reload();

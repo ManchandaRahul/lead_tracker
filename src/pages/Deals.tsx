@@ -4,6 +4,7 @@ import { signOut } from "firebase/auth";
 import { auth, db } from "../firebase/config";
 import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
+import { getAllowedLeadIds, getSessionUser, isRestrictedUser } from "../accessControl";
 
 type DealActivity = {
   id: string;
@@ -71,9 +72,10 @@ function formatWeightedAmount(value?: string, probability?: string, currency?: s
 }
 
 export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: string) => void }) {
-  const rawUser = localStorage.getItem("leadUser");
-  const user = rawUser ? JSON.parse(rawUser) : null;
+  const user = getSessionUser();
   const isAdmin = user?.role === "admin";
+  const restrictedLeadIds = getAllowedLeadIds(user);
+  const restrictedLeadSet = new Set(restrictedLeadIds);
   const logout = () => {
     signOut(auth);
     localStorage.removeItem("leadUser");
@@ -98,12 +100,20 @@ export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: s
     return () => unsubscribe();
   }, []);
 
+  const visibleDeals = useMemo(
+    () =>
+      isRestrictedUser(user)
+        ? deals.filter((deal) => restrictedLeadSet.has(deal.leadId || ""))
+        : deals,
+    [deals, restrictedLeadSet, user]
+  );
+
   const teamMembers = useMemo(() => {
-    return Array.from(new Set(deals.map((deal) => deal.handledBy).filter(Boolean))) as string[];
-  }, [deals]);
+    return Array.from(new Set(visibleDeals.map((deal) => deal.handledBy).filter(Boolean))) as string[];
+  }, [visibleDeals]);
 
   const filteredDeals = useMemo(() => {
-    return deals.filter((deal) => {
+    return visibleDeals.filter((deal) => {
       if (ownerFilter !== "All team members" && deal.handledBy !== ownerFilter) return false;
       if (outcomeFilter !== "all" && (deal.dealStatus || "open") !== outcomeFilter) return false;
       if (!search.trim()) return true;
@@ -115,26 +125,26 @@ export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: s
         deal.transactionId?.toLowerCase().includes(q)
       );
     });
-  }, [deals, ownerFilter, outcomeFilter, search]);
+  }, [visibleDeals, ownerFilter, outcomeFilter, search]);
 
   const wonCount = useMemo(
     () =>
-      deals.filter(
+      visibleDeals.filter(
         (deal) =>
           (ownerFilter === "All team members" || deal.handledBy === ownerFilter) &&
           (deal.dealStatus || "open") === "won"
       ).length,
-    [deals, ownerFilter]
+    [visibleDeals, ownerFilter]
   );
 
   const lostCount = useMemo(
     () =>
-      deals.filter(
+      visibleDeals.filter(
         (deal) =>
           (ownerFilter === "All team members" || deal.handledBy === ownerFilter) &&
           (deal.dealStatus || "open") === "lost"
       ).length,
-    [deals, ownerFilter]
+    [visibleDeals, ownerFilter]
   );
 
   const groupedDeals = useMemo(() => {

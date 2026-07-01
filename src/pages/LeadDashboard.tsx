@@ -16,6 +16,7 @@ import DeleteModal from "../components/DeleteModal";
 import AppHeaderNav from "../components/AppHeaderNav";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import { Page } from "../navigation";
+import { canAccessLead, getAllowedLeadIds, getSessionUser, isRestrictedUser } from "../accessControl";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const COLLECTION = "leads";
@@ -160,8 +161,10 @@ function Tooltip({ text }: { text: string }) {
 }
 
 export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, leadId?: string) => void }) {
-  const user    = JSON.parse(localStorage.getItem("leadUser")!);
+  const user    = getSessionUser();
   const isAdmin = user.role === "admin";
+  const restrictedLeadIds = getAllowedLeadIds(user);
+  const restrictedLeadSet = new Set(restrictedLeadIds);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
 
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -209,7 +212,11 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   }, []);
 
   const openLeadActions = (lead: Lead) => {
-    const relatedTransactions = transactions
+    if (!canAccessLead(user, lead.leadId)) return;
+
+    const relatedTransactions = (isRestrictedUser(user)
+      ? transactions.filter((transaction) => restrictedLeadSet.has(transaction.leadId))
+      : transactions)
       .filter((transaction) => transaction.leadId === lead.leadId)
       .sort((a, b) => {
         const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
@@ -226,7 +233,11 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   };
 
   // ── Filtered + sorted leads ──
-  const filtered = leads
+  const visibleLeads = isRestrictedUser(user)
+    ? leads.filter((lead) => restrictedLeadSet.has(lead.leadId))
+    : leads;
+
+  const filtered = visibleLeads
     .filter((l) => {
       if (statusFilter !== "All" && l.status !== statusFilter) return false;
       if (search) {
@@ -798,7 +809,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           </table>
         </div>
         <div style={{ marginTop: 12, fontSize: 12, color: "#94a3b8" }}>
-          Showing {filtered.length} of {leads.length} leads · Logged in as <b>{user.username}</b>
+          Showing {filtered.length} of {visibleLeads.length} leads · Logged in as <b>{user.username}</b>
           {isAdmin && <span style={{ marginLeft: 6, color: "#7c3aed" }}>👑 Admin</span>}
           &nbsp;·&nbsp;<span style={{ color: "#16a34a" }}>🔥 Connected to Firebase</span>
         </div>

@@ -6,6 +6,7 @@ import { logActivity } from "../firebase/activityLog";
 import DeleteModal from "../components/DeleteModal";
 import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
+import { canAccessLead, getSessionUser } from "../accessControl";
 
 const STAGES = ["Initial Call", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
@@ -266,7 +267,7 @@ export default function ActivityDetail({
   onNavigate: (p: Page, leadId?: string) => void;
   routeActivityId?: string | null;
 }) {
-  const user = JSON.parse(localStorage.getItem("leadUser")!);
+  const user = getSessionUser();
   const isAdmin = user.role === "admin";
   const logout = () => {
     signOut(auth);
@@ -323,6 +324,7 @@ export default function ActivityDetail({
     () => (selectedActivity ? leads.find((lead) => lead.leadId === selectedActivity.leadId) || null : null),
     [leads, selectedActivity]
   );
+  const hasLeadAccess = selectedActivity ? canAccessLead(user, selectedActivity.leadId) : true;
 
   useEffect(() => {
     if (selectedActivity) {
@@ -749,6 +751,23 @@ export default function ActivityDetail({
           </p>
           <button type="button" onClick={() => onNavigate("transactions")} style={S.btnPrimary}>
             Back to Activities
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasLeadAccess) {
+    return (
+      <div style={S.page}>
+        <AppPageHeader current="transactions" onNavigate={onNavigate} isAdmin={isAdmin} onLogout={logout} />
+        <div style={S.notFoundCard}>
+          <h2 style={{ margin: 0, fontSize: 22, color: "#0f172a" }}>Access denied</h2>
+          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.6 }}>
+            This activity belongs to a lead that is not assigned to your account.
+          </p>
+          <button type="button" onClick={() => onNavigate("leads")} style={S.btnPrimary}>
+            Back to Leads
           </button>
         </div>
       </div>

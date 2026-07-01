@@ -42,6 +42,7 @@ export default async function handler(req, res) {
       displayName,
       role,
       status,
+      allowedLeadIds,
       temporaryPassword,
       createdBy,
     } = req.body || {};
@@ -53,8 +54,13 @@ export default async function handler(req, res) {
     const normalizedUsername = String(username).trim();
     const normalizedEmail = String(email).trim().toLowerCase();
     const normalizedDisplayName = String(displayName).trim();
-    const normalizedRole = role === "admin" ? "admin" : "user";
+    const normalizedRole =
+      role === "admin" ? "admin" : role === "restricted_user" ? "restricted_user" : "user";
     const normalizedStatus = status === "inactive" ? "inactive" : "active";
+    const normalizedAllowedLeadIds =
+      normalizedRole === "restricted_user" && Array.isArray(allowedLeadIds)
+        ? Array.from(new Set(allowedLeadIds.map((value) => String(value).trim()).filter(Boolean)))
+        : [];
 
     const existingUsernameSnap = await firestore
       .collection("users")
@@ -89,6 +95,7 @@ export default async function handler(req, res) {
       displayName: normalizedDisplayName,
       role: normalizedRole,
       status: normalizedStatus,
+      allowedLeadIds: normalizedAllowedLeadIds,
       createdAt: now,
       updatedAt: now,
       createdBy: createdBy || adminUser.username || decoded.uid,
@@ -97,8 +104,13 @@ export default async function handler(req, res) {
     return sendJson(res, 200, { ok: true, uid: createdUser.uid });
   } catch (error) {
     console.error("create-user error:", error);
+    const errorMessage =
+      error?.message ||
+      error?.errorInfo?.message ||
+      (typeof error === "string" ? error : JSON.stringify(error));
+    const errorCode = error?.code || error?.errorInfo?.code || "";
     return sendJson(res, 500, {
-      error: error?.message || "Failed to create user.",
+      error: errorCode ? `${errorMessage} (${errorCode})` : errorMessage || "Failed to create user.",
     });
   }
 }
