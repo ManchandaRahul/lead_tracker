@@ -1759,6 +1759,27 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     </div>
   );
 
+  const formatActionsForExport = (activity: Activity) => {
+    const entries = normalizeTimelineEntries(activity.actions || []);
+    if (!entries.length) return "";
+
+    return entries
+      .map((entry, index) => {
+        const headerParts = [
+          `${index + 1}. ${entry.title || TIMELINE_META[entry.category]?.label || "Action"}`,
+          entry.category ? `Type: ${TIMELINE_META[entry.category]?.label || entry.category}` : "",
+          entry.date ? `Date: ${entry.date}` : "",
+          entry.time ? `Time: ${entry.time}` : "",
+          entry.place ? `Place: ${entry.place}` : "",
+          entry.createdBy ? `Created By: ${entry.createdBy}` : "",
+        ].filter(Boolean);
+
+        const description = normalizeActionText(entry.description || "");
+        return description ? `${headerParts.join(" | ")}\n${description}` : headerParts.join(" | ");
+      })
+      .join("\n\n");
+  };
+
   const downloadExcel = () => {
     const allCols: Record<string, (a: Activity) => any> = {
       "Account Name":  (a) => a.accountName,
@@ -1767,8 +1788,9 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       "Stage":         (a) => a.stage,
       "Handled By":    (a) => a.handledBy,
       "Notes":         (a) => a.notes,
+      "Actions":       (a) => formatActionsForExport(a),
     };
-    const visibleKeys = Object.keys(allCols).filter(k => visibleCols[k]);
+    const visibleKeys = Object.keys(allCols).filter((k) => k === "Actions" || visibleCols[k]);
     const rows = filtered.map((a) =>
       Object.fromEntries(visibleKeys.map(k => [k, allCols[k](a)]))
     );
