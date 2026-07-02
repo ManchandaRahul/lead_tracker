@@ -69,6 +69,9 @@ const TIMELINE_META: Record<TimelineCategory, { label: string; bg: string; color
   update: { label: "Update", bg: "#f1f5f9", color: "#475569" },
 };
 
+const MAX_ACTION_DESCRIPTION_BYTES = 20000;
+const MAX_TRANSACTION_DOCUMENT_BYTES = 900000;
+
 const createEmptyDealItem = (): DealItem => ({
   itemName: "",
   description: "",
@@ -226,6 +229,10 @@ function createTimelineEntry(
     createdBy: overrides.createdBy || userName,
     amount: overrides.amount || "",
   };
+}
+
+function getUtf8Size(value: unknown) {
+  return new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value)).length;
 }
 
 function getEffectiveAmountFromActivity(activity: Partial<Activity>) {
@@ -625,6 +632,18 @@ export default function ActivityDetail({
 
   const saveAction = async () => {
     if (!activeAction) return;
+    const normalizedDescription = normalizeActionText(actionDescription || "");
+    if (!normalizedDescription.trim()) {
+      setSaveFeedback({ type: "error", message: `Please enter ${activeAction.toLowerCase()} details before saving.` });
+      return;
+    }
+    if (getUtf8Size(normalizedDescription) > MAX_ACTION_DESCRIPTION_BYTES) {
+      setSaveFeedback({
+        type: "error",
+        message: `${activeAction} text is too large to save in one entry. Please split it into smaller notes or actions.`,
+      });
+      return;
+    }
     const category = activeAction.toLowerCase() as TimelineCategory;
     const meetingContext =
       activeAction === "Meeting"
@@ -632,7 +651,7 @@ export default function ActivityDetail({
           ? `Online - ${meetingUrl.trim()}`
           : meetingPlace.trim()
         : "";
-    const newAction = createTimelineEntry(user.username, category, activeAction, actionDescription || "", {
+    const newAction = createTimelineEntry(user.username, category, activeAction, normalizedDescription, {
       date: actionDate,
       time: actionTime,
       place: meetingContext,
@@ -641,12 +660,22 @@ export default function ActivityDetail({
       ...draft,
       actions: [...normalizeTimelineEntries(draft.actions || []), newAction],
     };
+    if (getUtf8Size(nextDraft) > MAX_TRANSACTION_DOCUMENT_BYTES) {
+      setSaveFeedback({
+        type: "error",
+        message: "This activity is too large to save as one record. Please shorten the note or split it into multiple smaller entries.",
+      });
+      return;
+    }
     setDraft(nextDraft);
     try {
       await persistActivity(nextDraft);
       setSaveFeedback({ type: "success", message: `${activeAction} saved successfully.` });
-    } catch (error) {
-      setSaveFeedback({ type: "error", message: `Failed to save ${activeAction.toLowerCase()}. Please try again.` });
+    } catch (error: any) {
+      setSaveFeedback({
+        type: "error",
+        message: error?.message || `Failed to save ${activeAction.toLowerCase()}. Please try again.`,
+      });
       return;
     }
     setActiveAction(null);

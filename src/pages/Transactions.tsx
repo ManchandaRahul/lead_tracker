@@ -240,6 +240,9 @@ const TIMELINE_META: Record<TimelineCategory, { label: string; bg: string; color
   update: { label: "Update", bg: "#f1f5f9", color: "#475569" },
 };
 
+const MAX_ACTION_DESCRIPTION_BYTES = 20000;
+const MAX_TRANSACTION_DOCUMENT_BYTES = 900000;
+
 export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: (p: Page, leadId?: string) => void; routeLeadId?: string | null }) {
   const user    = getSessionUser();
   const isAdmin = user.role === "admin";
@@ -376,6 +379,9 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     createdAt: overrides.createdAt || new Date().toISOString(),
     createdBy: overrides.createdBy || user.username,
   });
+
+  const getUtf8Size = (value: unknown) =>
+    new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value)).length;
 
   const getEffectiveAmountFromActivity = (activity: Partial<Activity>) => {
     const rawAmount = parseFloat(String(activity.dealValue || "0")) || 0;
@@ -789,12 +795,21 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   // Save inline action as structured record
   const saveAction = () => {
     if (!activeAction) return;
+    const normalizedDescription = normalizeActionText(actionDescription || "");
+    if (!normalizedDescription.trim()) {
+      setImportResult(`Please enter ${activeAction.toLowerCase()} details before saving.`);
+      return;
+    }
+    if (getUtf8Size(normalizedDescription) > MAX_ACTION_DESCRIPTION_BYTES) {
+      setImportResult(`${activeAction} text is too large to save in one entry. Please split it into smaller notes or actions.`);
+      return;
+    }
 
     const category = activeAction.toLowerCase() as TimelineCategory;
     const newAction = createTimelineEntry(
       category,
       activeAction,
-      actionDescription || "",
+      normalizedDescription,
       {
         date: actionDate,
         time: actionTime,
@@ -802,9 +817,19 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       }
     );
 
+    const nextActions = [...normalizeTimelineEntries(formData.actions || []), newAction];
+    const nextDraft = {
+      ...formData,
+      actions: nextActions,
+    };
+    if (getUtf8Size(nextDraft) > MAX_TRANSACTION_DOCUMENT_BYTES) {
+      setImportResult("This activity is too large to save as one record. Please shorten the note or split it into multiple smaller entries.");
+      return;
+    }
+
     setFormData(prev => ({
       ...prev,
-      actions: [...normalizeTimelineEntries(prev.actions || []), newAction],
+      actions: nextActions,
     }));
 
     setActiveAction(null);
