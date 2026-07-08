@@ -128,6 +128,153 @@ function formatPhoneWithCountryCode(countryCode?: string, phone?: string) {
   return `${code} ${number}`;
 }
 
+function normalizeLeadText(value: string) {
+  const lines = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .split("\n");
+  const normalized: string[] = [];
+  for (const line of lines) {
+    const cleaned = line.replace(/\t/g, " ").replace(/[ ]{2,}/g, " ").trim();
+    if (!cleaned) {
+      if (normalized[normalized.length - 1] !== "") normalized.push("");
+      continue;
+    }
+    const bulletMatch = cleaned.match(/^([•◦▪▫‣⁃·*-]|\d+[.)]|[a-zA-Z][.)])\s*(.*)$/);
+    if (bulletMatch) {
+      const bulletBody = bulletMatch[2].trim();
+      normalized.push(bulletBody ? `• ${bulletBody}` : "•");
+      continue;
+    }
+    normalized.push(cleaned);
+  }
+  return normalized.join("\n").trim();
+}
+
+function handleNormalizedTextareaPaste(
+  event: React.ClipboardEvent<HTMLTextAreaElement>,
+  currentValue: string,
+  setValue: (value: string) => void
+) {
+  event.preventDefault();
+  const pasted = normalizeLeadText(event.clipboardData.getData("text/plain"));
+  const target = event.currentTarget;
+  const start = target.selectionStart ?? currentValue.length;
+  const end = target.selectionEnd ?? currentValue.length;
+  const nextValue = `${currentValue.slice(0, start)}${pasted}${currentValue.slice(end)}`;
+  setValue(normalizeLeadText(nextValue));
+}
+
+function getRemarksPreview(value?: string, maxLength = 140) {
+  const normalized = normalizeLeadTextRichV2(String(value || ""));
+  if (!normalized) return "";
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength).trimEnd()}...` : normalized;
+}
+
+function normalizeLeadTextRich(value: string) {
+  const lines = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .split("\n");
+  const normalized: string[] = [];
+  for (const line of lines) {
+    const cleaned = line.replace(/\t/g, " ").replace(/[ ]{2,}/g, " ").trim();
+    if (!cleaned) {
+      if (normalized[normalized.length - 1] !== "") normalized.push("");
+      continue;
+    }
+    const bulletMatch = cleaned.match(/^([\u2022\u25E6\u25AA\u25AB\u2023\u2043\u00B7*-]|\d+[.)]|[a-zA-Z][.)])\s*(.*)$/u);
+    if (bulletMatch) {
+      const bulletBody = bulletMatch[2].trim();
+      normalized.push(bulletBody ? `• ${bulletBody}` : "•");
+      continue;
+    }
+    normalized.push(cleaned);
+  }
+  return normalized.join("\n").trim();
+}
+
+function extractClipboardTextRich(clipboardData: DataTransfer) {
+  const html = clipboardData.getData("text/html");
+  if (html && /<li[\s>]/i.test(html)) {
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const items = Array.from(container.querySelectorAll("li"))
+      .map((item) => normalizeLeadTextRich(item.textContent || ""))
+      .filter(Boolean);
+    if (items.length) {
+      return items.map((item) => `• ${item.replace(/^•\s*/, "")}`).join("\n");
+    }
+  }
+  return clipboardData.getData("text/plain");
+}
+
+function handleNormalizedTextareaPasteRich(
+  event: React.ClipboardEvent<HTMLTextAreaElement>,
+  currentValue: string,
+  setValue: (value: string) => void
+) {
+  event.preventDefault();
+  const pasted = normalizeLeadTextRich(extractClipboardTextRich(event.clipboardData));
+  const target = event.currentTarget;
+  const start = target.selectionStart ?? currentValue.length;
+  const end = target.selectionEnd ?? currentValue.length;
+  const nextValue = `${currentValue.slice(0, start)}${pasted}${currentValue.slice(end)}`;
+  setValue(normalizeLeadTextRich(nextValue));
+}
+
+function normalizeLeadTextRichV2(value: string) {
+  const lines = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .split("\n");
+  const normalized: string[] = [];
+  for (const line of lines) {
+    const cleaned = line.replace(/\t/g, " ").replace(/[ ]{2,}/g, " ").trim();
+    if (!cleaned) {
+      if (normalized[normalized.length - 1] !== "") normalized.push("");
+      continue;
+    }
+    const bulletMatch = cleaned.match(/^([\u2022\u25E6\u25AA\u25AB\u2023\u2043\u00B7*-]|\d+[.)]|[a-zA-Z][.)])\s*(.*)$/u);
+    if (bulletMatch) {
+      const bulletBody = bulletMatch[2].trim();
+      normalized.push(bulletBody ? `\u2022 ${bulletBody}` : "\u2022");
+      continue;
+    }
+    normalized.push(cleaned);
+  }
+  return normalized.join("\n").trim();
+}
+
+function extractClipboardTextRichV2(clipboardData: DataTransfer) {
+  const html = clipboardData.getData("text/html");
+  if (html && /<li[\s>]/i.test(html)) {
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const items = Array.from(container.querySelectorAll("li"))
+      .map((item) => normalizeLeadTextRichV2(item.textContent || ""))
+      .filter(Boolean);
+    if (items.length) {
+      return items.map((item) => `\u2022 ${item.replace(/^\u2022\s*/, "")}`).join("\n");
+    }
+  }
+  return clipboardData.getData("text/plain");
+}
+
+function handleNormalizedTextareaPasteRichV2(
+  event: React.ClipboardEvent<HTMLTextAreaElement>,
+  currentValue: string,
+  setValue: (value: string) => void
+) {
+  event.preventDefault();
+  const pasted = normalizeLeadTextRichV2(extractClipboardTextRichV2(event.clipboardData));
+  const target = event.currentTarget;
+  const start = target.selectionStart ?? currentValue.length;
+  const end = target.selectionEnd ?? currentValue.length;
+  const nextValue = `${currentValue.slice(0, start)}${pasted}${currentValue.slice(end)}`;
+  setValue(normalizeLeadTextRichV2(nextValue));
+}
+
 const NORMALIZED_EXCEL_MAP = Object.fromEntries(
   Object.entries(EXCEL_MAP).map(([column, field]) => [normalizeExcelHeader(column), field])
 ) as Record<string, keyof typeof EMPTY_LEAD>;
@@ -293,6 +440,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     setFormErrors({});
     const payload = {
       ...formData,
+      remarks: normalizeLeadTextRichV2(formData.remarks || ""),
       leadId: formData.leadId || generateLeadId(),
       leadDate: formData.leadDate || new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString(),
@@ -392,7 +540,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       "Partner Email":      (l) => l.partnerEmail,
       "Partner Phone":      (l) => formatPhoneWithCountryCode((l as any).partnerCountryCode, l.partnerPhone),
       "Status":             (l) => l.status,
-      "Remarks":            (l) => l.remarks,
+      "Remarks":            (l) => normalizeLeadTextRichV2(l.remarks || ""),
     };
     // Only export visible columns
     const visibleKeys = Object.keys(allCols).filter(k => visibleCols[k]);
@@ -704,6 +852,11 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                 style={{ ...S.fInput, resize: "vertical" }}
                 value={formData.remarks}
                 onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+                onPaste={(e) =>
+                  handleNormalizedTextareaPasteRichV2(e, formData.remarks, (value) =>
+                    setFormData((prev) => ({ ...prev, remarks: value }))
+                  )
+                }
               />
             </div>
 
@@ -792,7 +945,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                     </select>
                   </td>}
                   {visibleCols["Remarks"] && <td style={{ ...S.td, minWidth: 200, maxWidth: 240, color: "#64748b", fontSize: 12, whiteSpace: "pre-wrap" }}>
-                    {lead.remarks || <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No remarks</span>}
+                    {lead.remarks ? (
+                      <span title={normalizeLeadTextRichV2(lead.remarks)}>{getRemarksPreview(lead.remarks)}</span>
+                    ) : <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No remarks</span>}
                   </td>}
 
                   {/* Actions */}

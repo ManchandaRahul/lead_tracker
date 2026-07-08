@@ -172,6 +172,12 @@ function normalizeActionText(value: string) {
       if (normalized[normalized.length - 1] !== "") normalized.push("");
       continue;
     }
+    const bulletMatch = cleaned.match(/^([•◦▪▫‣⁃·*-]|\d+[.)]|[a-zA-Z][.)])\s*(.*)$/);
+    if (bulletMatch) {
+      const bulletBody = bulletMatch[2].trim();
+      normalized.push(bulletBody ? `• ${bulletBody}` : "•");
+      continue;
+    }
     normalized.push(cleaned);
   }
   return normalized.join("\n").trim();
@@ -189,6 +195,110 @@ function handleNormalizedTextareaPaste(
   const end = target.selectionEnd ?? currentValue.length;
   const nextValue = `${currentValue.slice(0, start)}${pasted}${currentValue.slice(end)}`;
   setValue(normalizeActionText(nextValue));
+}
+
+function normalizeActionTextRich(value: string) {
+  const lines = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .split("\n");
+  const normalized: string[] = [];
+  for (const line of lines) {
+    const cleaned = line.replace(/\t/g, " ").replace(/[ ]{2,}/g, " ").trim();
+    if (!cleaned) {
+      if (normalized[normalized.length - 1] !== "") normalized.push("");
+      continue;
+    }
+    const bulletMatch = cleaned.match(/^([\u2022\u25E6\u25AA\u25AB\u2023\u2043\u00B7*-]|\d+[.)]|[a-zA-Z][.)])\s*(.*)$/u);
+    if (bulletMatch) {
+      const bulletBody = bulletMatch[2].trim();
+      normalized.push(bulletBody ? `• ${bulletBody}` : "•");
+      continue;
+    }
+    normalized.push(cleaned);
+  }
+  return normalized.join("\n").trim();
+}
+
+function extractClipboardTextRich(clipboardData: DataTransfer) {
+  const html = clipboardData.getData("text/html");
+  if (html && /<li[\s>]/i.test(html)) {
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const items = Array.from(container.querySelectorAll("li"))
+      .map((item) => normalizeActionTextRich(item.textContent || ""))
+      .filter(Boolean);
+    if (items.length) {
+      return items.map((item) => `• ${item.replace(/^•\s*/, "")}`).join("\n");
+    }
+  }
+  return clipboardData.getData("text/plain");
+}
+
+function handleNormalizedTextareaPasteRich(
+  event: React.ClipboardEvent<HTMLTextAreaElement>,
+  currentValue: string,
+  setValue: (value: string) => void
+) {
+  event.preventDefault();
+  const pasted = normalizeActionTextRich(extractClipboardTextRich(event.clipboardData));
+  const target = event.currentTarget;
+  const start = target.selectionStart ?? currentValue.length;
+  const end = target.selectionEnd ?? currentValue.length;
+  const nextValue = `${currentValue.slice(0, start)}${pasted}${currentValue.slice(end)}`;
+  setValue(normalizeActionTextRich(nextValue));
+}
+
+function normalizeActionTextRichV2(value: string) {
+  const lines = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .split("\n");
+  const normalized: string[] = [];
+  for (const line of lines) {
+    const cleaned = line.replace(/\t/g, " ").replace(/[ ]{2,}/g, " ").trim();
+    if (!cleaned) {
+      if (normalized[normalized.length - 1] !== "") normalized.push("");
+      continue;
+    }
+    const bulletMatch = cleaned.match(/^([\u2022\u25E6\u25AA\u25AB\u2023\u2043\u00B7*-]|\d+[.)]|[a-zA-Z][.)])\s*(.*)$/u);
+    if (bulletMatch) {
+      const bulletBody = bulletMatch[2].trim();
+      normalized.push(bulletBody ? `\u2022 ${bulletBody}` : "\u2022");
+      continue;
+    }
+    normalized.push(cleaned);
+  }
+  return normalized.join("\n").trim();
+}
+
+function extractClipboardTextRichV2(clipboardData: DataTransfer) {
+  const html = clipboardData.getData("text/html");
+  if (html && /<li[\s>]/i.test(html)) {
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const items = Array.from(container.querySelectorAll("li"))
+      .map((item) => normalizeActionTextRichV2(item.textContent || ""))
+      .filter(Boolean);
+    if (items.length) {
+      return items.map((item) => `\u2022 ${item.replace(/^\u2022\s*/, "")}`).join("\n");
+    }
+  }
+  return clipboardData.getData("text/plain");
+}
+
+function handleNormalizedTextareaPasteRichV2(
+  event: React.ClipboardEvent<HTMLTextAreaElement>,
+  currentValue: string,
+  setValue: (value: string) => void
+) {
+  event.preventDefault();
+  const pasted = normalizeActionTextRichV2(extractClipboardTextRichV2(event.clipboardData));
+  const target = event.currentTarget;
+  const start = target.selectionStart ?? currentValue.length;
+  const end = target.selectionEnd ?? currentValue.length;
+  const nextValue = `${currentValue.slice(0, start)}${pasted}${currentValue.slice(end)}`;
+  setValue(normalizeActionTextRichV2(nextValue));
 }
 
 function formatPhoneWithCountryCode(countryCode?: string, phone?: string) {
@@ -354,7 +464,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         id: entry.id || `${createdAt}_${index}`,
         category,
         title: entry.title || entry.type || TIMELINE_META[category]?.label || "Update",
-        description: normalizeActionText(entry.description || ""),
+        description: normalizeActionTextRichV2(entry.description || ""),
         date: entry.date || createdAt.slice(0, 10),
         time: entry.time || "",
         place: entry.place || "",
@@ -372,7 +482,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     id: generateTimelineId(),
     category,
     title,
-    description: normalizeActionText(description),
+    description: normalizeActionTextRichV2(description),
     date: overrides.date || new Date().toISOString().slice(0, 10),
     time: overrides.time || "",
     place: overrides.place || "",
@@ -555,6 +665,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     } else {
       const basePayload = {
         ...formData,
+        notes: normalizeActionTextRichV2(formData.notes || ""),
         actions: normalizeTimelineEntries(formData.actions || []),
         transactionId: formData.transactionId || generateActivityId(),
         activityDate: formData.activityDate || new Date().toISOString().slice(0, 10),
@@ -591,6 +702,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   ) => {
     const basePayload = {
       ...sourceData,
+      notes: normalizeActionTextRichV2(sourceData.notes || ""),
       actions: normalizeTimelineEntries(sourceData.actions || []),
       transactionId: sourceData.transactionId || generateActivityId(),
       activityDate: sourceData.activityDate || new Date().toISOString().slice(0, 10),
@@ -795,7 +907,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   // Save inline action as structured record
   const saveAction = () => {
     if (!activeAction) return;
-    const normalizedDescription = normalizeActionText(actionDescription || "");
+    const normalizedDescription = normalizeActionTextRichV2(actionDescription || "");
     if (!normalizedDescription.trim()) {
       setImportResult(`Please enter ${activeAction.toLowerCase()} details before saving.`);
       return;
@@ -1183,7 +1295,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             </div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 8, display: "block" }}>Description (Optional)</label>
-              <textarea value={rowActionDescription} onChange={e => setRowActionDescription(e.target.value)} onPaste={(e) => handleNormalizedTextareaPaste(e, rowActionDescription, setRowActionDescription)} rows={4} style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }} placeholder="Add details here..." />
+              <textarea value={rowActionDescription} onChange={e => setRowActionDescription(e.target.value)} onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, rowActionDescription, setRowActionDescription)} rows={4} style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }} placeholder="Add details here..." />
             </div>
             <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => setRowActiveAction(null)} style={{ padding: "10px 24px", border: "none", background: "transparent", color: "#64748b", fontWeight: 600 }}>Cancel</button>
@@ -1608,7 +1720,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             <textarea
               value={actionDescription}
               onChange={e => setActionDescription(e.target.value)}
-              onPaste={(e) => handleNormalizedTextareaPaste(e, actionDescription, setActionDescription)}
+                  onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, actionDescription, setActionDescription)}
               rows={4}
               style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }}
               placeholder="Add details here..."
@@ -1774,7 +1886,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
           entry.createdBy ? `Created By: ${entry.createdBy}` : "",
         ].filter(Boolean);
 
-        const description = normalizeActionText(entry.description || "");
+        const description = normalizeActionTextRichV2(entry.description || "");
         return description ? `${headerParts.join(" | ")}\n${description}` : headerParts.join(" | ");
       })
       .join("\n\n");
@@ -1787,7 +1899,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       "Date":          (a) => a.activityDate,
       "Stage":         (a) => a.stage,
       "Handled By":    (a) => a.handledBy,
-      "Notes":         (a) => a.notes,
+      "Notes":         (a) => normalizeActionTextRichV2(a.notes || ""),
       "Actions":       (a) => formatActionsForExport(a),
     };
     const visibleKeys = Object.keys(allCols).filter((k) => k === "Actions" || visibleCols[k]);
