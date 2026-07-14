@@ -40,6 +40,8 @@ type TimelineEntry = {
   date: string;
   time?: string;
   place?: string;
+  followUpDate?: string;
+  followUpTime?: string;
   createdAt: string;
   createdBy?: string;
 };
@@ -57,6 +59,9 @@ const EMPTY_ACTIVITY = {
   accountName: "",
   activityName: "",
   activityDate: "",
+  endDate: "",
+  followUpDate: "",
+  followUpTime: "",
   stage: "Kickoff",
   handledBy: "",
   notes: "",
@@ -97,6 +102,9 @@ type Lead = {
   partnerCountryCode?: string;
   partnerPhone?: string;
   status?: string;
+  prospectType?: string;
+  followUpDate?: string;
+  followUpTime?: string;
   remarks?: string;
 };
 
@@ -309,6 +317,17 @@ function formatPhoneWithCountryCode(countryCode?: string, phone?: string) {
   return `${code} ${number}`;
 }
 
+function isPastSchedule(date: string, time: string) {
+  if (!date) return false;
+  const now = new Date();
+  const candidate = new Date(`${date}T${time || "00:00"}`);
+  return candidate.getTime() < now.getTime();
+}
+
+function getActionCategory(action: "Note" | "Call" | "Meeting"): TimelineCategory {
+  return action.toLowerCase() as TimelineCategory;
+}
+
 function deriveImportedStage(...texts: string[]) {
   const haystack = texts.join(" ").toLowerCase();
   if (/completed|complete|go live|go-live|running as required|completed successfully/.test(haystack)) return "Completed";
@@ -375,8 +394,9 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const [showColModal, setShowColModal] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
     "Account Name": true,
-    "Activity Name": true,
-    "Date": true,
+    "Lead Name": true,
+    "Start Date": true,
+    "End Date": true,
     "Stage": true,
     "Handled By": true,
     "Notes": true,
@@ -395,6 +415,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const [meetingPlace, setMeetingPlace] = useState("");
   const [actionDescription, setActionDescription] = useState("");
   const [actionDate, setActionDate] = useState(new Date().toISOString().slice(0, 10));
+  const [actionFollowUpDate, setActionFollowUpDate] = useState("");
+  const [actionFollowUpTime, setActionFollowUpTime] = useState("");
   const [timelineFilter, setTimelineFilter] = useState<"all" | TimelineCategory>("all");
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -468,6 +490,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         date: entry.date || createdAt.slice(0, 10),
         time: entry.time || "",
         place: entry.place || "",
+        followUpDate: entry.followUpDate || "",
+        followUpTime: entry.followUpTime || "",
         createdAt,
         createdBy: entry.createdBy || entry.actionBy || "",
       };
@@ -486,6 +510,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     date: overrides.date || new Date().toISOString().slice(0, 10),
     time: overrides.time || "",
     place: overrides.place || "",
+    followUpDate: overrides.followUpDate || "",
+    followUpTime: overrides.followUpTime || "",
     createdAt: overrides.createdAt || new Date().toISOString(),
     createdBy: overrides.createdBy || user.username,
   });
@@ -659,6 +685,16 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (formData.stage === "On Hold") {
+      if (!formData.followUpDate || !formData.followUpTime) {
+        setImportResult("Please enter the next follow-up date and time before saving an On Hold lead.");
+        return;
+      }
+      if (isPastSchedule(formData.followUpDate, formData.followUpTime)) {
+        setImportResult("Next follow-up date and time cannot be in the past.");
+        return;
+      }
+    }
     const previousActivity = editingId ? (activities.find(activity => activity.id === editingId) || null) : null;
     if (editingId) {
       await persistExistingActivity(editingId, formData, previousActivity, deletedActionLogs);
@@ -717,7 +753,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     await updateDoc(doc(db, "transactions", activityId), payload);
     await logActivity(payload.transactionId, payload.accountName, "transactions", {
       actionType: "TXN_EDITED",
-      description: `Activity "${payload.activityName}" for "${payload.accountName}" was edited`,
+      description: `Lead "${payload.activityName}" for "${payload.accountName}" was edited`,
       actionBy: user.username, timestamp: new Date().toISOString(),
     });
     for (const dealEntry of dealTimelineEntries) {
@@ -759,6 +795,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     setActiveAction(null);           // Close any open action section
     setActionDescription("");
     setMeetingPlace("");
+    setActionFollowUpDate("");
+    setActionFollowUpTime("");
     setTimelineFilter("all");
   };
 
@@ -789,6 +827,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     setActiveAction(null);
     setActionDescription("");
     setMeetingPlace("");
+    setActionFollowUpDate("");
+    setActionFollowUpTime("");
     setTimelineFilter("all");
   };
 
@@ -801,6 +841,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     setActiveAction(null);
     setActionDescription("");
     setMeetingPlace("");
+    setActionFollowUpDate("");
+    setActionFollowUpTime("");
   };
 
   const confirmDeleteAction = (reason: string) => {
@@ -824,7 +866,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     const { activity } = deleteModal;
     await logActivity(activity.transactionId, activity.accountName, "transactions", {
       actionType: "TXN_DELETED",
-      description: `Activity "${activity.activityName}" for "${activity.accountName}" was deleted. Reason: ${reason}`,
+      description: `Lead "${activity.activityName}" for "${activity.accountName}" was deleted. Reason: ${reason}`,
       actionBy: user.username, timestamp: new Date().toISOString(),
     });
     await deleteDoc(doc(db, "transactions", activity.id));
@@ -851,6 +893,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     setActiveAction(type);
     setActionDescription("");
     setMeetingPlace("");
+    setActionFollowUpDate("");
+    setActionFollowUpTime("");
   };
 
   const toggleDealMode = () => {
@@ -912,12 +956,20 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       setImportResult(`Please enter ${activeAction.toLowerCase()} details before saving.`);
       return;
     }
+    if ((actionFollowUpDate && !actionFollowUpTime) || (!actionFollowUpDate && actionFollowUpTime)) {
+      setImportResult("Please enter both follow-up date and follow-up time.");
+      return;
+    }
+    if (actionFollowUpDate && actionFollowUpTime && isPastSchedule(actionFollowUpDate, actionFollowUpTime)) {
+      setImportResult("Follow-up date and time cannot be in the past.");
+      return;
+    }
     if (getUtf8Size(normalizedDescription) > MAX_ACTION_DESCRIPTION_BYTES) {
       setImportResult(`${activeAction} text is too large to save in one entry. Please split it into smaller notes or actions.`);
       return;
     }
 
-    const category = activeAction.toLowerCase() as TimelineCategory;
+    const category = getActionCategory(activeAction);
     const newAction = createTimelineEntry(
       category,
       activeAction,
@@ -926,6 +978,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         date: actionDate,
         time: actionTime,
         place: meetingPlace || "",
+        followUpDate: actionFollowUpDate,
+        followUpTime: actionFollowUpTime,
       }
     );
 
@@ -947,6 +1001,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     setActiveAction(null);
     setActionDescription("");
     setMeetingPlace("");
+    setActionFollowUpDate("");
+    setActionFollowUpTime("");
   };
 
   const timelineEntries = normalizeTimelineEntries(formData.actions || []).sort(
@@ -963,6 +1019,9 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     const [rowMeetingPlace, setRowMeetingPlace] = useState("");
     const [rowActionDescription, setRowActionDescription] = useState("");
     const [rowActionDate, setRowActionDate] = useState(new Date().toISOString().slice(0, 10));
+    const [rowActionFollowUpDate, setRowActionFollowUpDate] = useState("");
+    const [rowActionFollowUpTime, setRowActionFollowUpTime] = useState("");
+    const [rowActionError, setRowActionError] = useState("");
     const [rowTimelineFilter, setRowTimelineFilter] = useState<"all" | TimelineCategory>("all");
     const [rowLostModal, setRowLostModal] = useState(false);
     const [rowLostReason, setRowLostReason] = useState("");
@@ -975,6 +1034,9 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       setRowActiveAction(null);
       setRowActionDescription("");
       setRowMeetingPlace("");
+      setRowActionFollowUpDate("");
+      setRowActionFollowUpTime("");
+      setRowActionError("");
       setRowTimelineFilter("all");
     }, [activity]);
 
@@ -1036,16 +1098,35 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       setRowActiveAction(type);
       setRowActionDescription("");
       setRowMeetingPlace("");
+      setRowActionFollowUpDate("");
+      setRowActionFollowUpTime("");
+      setRowActionError("");
     };
 
     const saveRowAction = () => {
       if (!rowActiveAction) return;
-      const category = rowActiveAction.toLowerCase() as TimelineCategory;
-      const newAction = createTimelineEntry(category, rowActiveAction, rowActionDescription || "", {
+      const normalizedDescription = normalizeActionTextRichV2(rowActionDescription || "");
+      if (!normalizedDescription.trim()) {
+        setRowActionError(`Please enter ${rowActiveAction.toLowerCase()} details before saving.`);
+        return;
+      }
+      if ((rowActionFollowUpDate && !rowActionFollowUpTime) || (!rowActionFollowUpDate && rowActionFollowUpTime)) {
+        setRowActionError("Please enter both follow-up date and follow-up time.");
+        return;
+      }
+      if (rowActionFollowUpDate && rowActionFollowUpTime && isPastSchedule(rowActionFollowUpDate, rowActionFollowUpTime)) {
+        setRowActionError("Follow-up date and time cannot be in the past.");
+        return;
+      }
+      const category = getActionCategory(rowActiveAction);
+      const newAction = createTimelineEntry(category, rowActiveAction, normalizedDescription, {
         date: rowActionDate,
         time: rowActionTime,
         place: rowMeetingPlace || "",
+        followUpDate: rowActionFollowUpDate,
+        followUpTime: rowActionFollowUpTime,
       });
+      setRowActionError("");
       setDraft(prev => ({
         ...prev,
         actions: [...normalizeTimelineEntries(prev.actions || []), newAction],
@@ -1053,6 +1134,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       setRowActiveAction(null);
       setRowActionDescription("");
       setRowMeetingPlace("");
+      setRowActionFollowUpDate("");
+      setRowActionFollowUpTime("");
     };
 
     const saveRowLostReason = () => {
@@ -1289,13 +1372,20 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         {rowActiveAction && (
           <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, marginBottom: 20 }}>
             <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {rowActiveAction}</h4>
-            <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+              <input type="date" value={rowActionDate} onChange={e => setRowActionDate(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 170 }} />
               <input type="time" value={rowActionTime} onChange={e => setRowActionTime(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 140 }} />
               {rowActiveAction === "Meeting" && <input type="text" placeholder="Meeting place" value={rowMeetingPlace} onChange={e => setRowMeetingPlace(e.target.value)} style={{ flex: 1, padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8 }} />}
             </div>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 8, display: "block" }}>Description (Optional)</label>
+              <label style={{ fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 8, display: "block" }}>Details * (required)</label>
               <textarea value={rowActionDescription} onChange={e => setRowActionDescription(e.target.value)} onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, rowActionDescription, setRowActionDescription)} rows={4} style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }} placeholder="Add details here..." />
+              {rowActionError && <div style={{ marginTop: 6, fontSize: 12, color: "#dc2626" }}>{rowActionError}</div>}
+            </div>
+            <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+              <input type="date" min={new Date().toISOString().slice(0, 10)} value={rowActionFollowUpDate} onChange={e => setRowActionFollowUpDate(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 170 }} />
+              <input type="time" value={rowActionFollowUpTime} onChange={e => setRowActionFollowUpTime(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 140 }} />
+              <div style={{ alignSelf: "center", fontSize: 12, color: "#64748b" }}>Next follow-up for this action</div>
             </div>
             <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => setRowActiveAction(null)} style={{ padding: "10px 24px", border: "none", background: "transparent", color: "#64748b", fontWeight: 600 }}>Cancel</button>
@@ -1354,8 +1444,13 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                             <span style={{ fontSize: 12, color: "#64748b" }}>{entry.date}{entry.time ? ` at ${entry.time}` : ""}</span>
                           </div>
                           <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: entry.description ? 4 : 0 }}>{entry.title}</div>
-                          {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>Place: {entry.place}</div>}
-                          {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{entry.description}</div>}
+                                   {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>Place: {entry.place}</div>}
+                                   {(entry.followUpDate || entry.followUpTime) && (
+                                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>
+                                       Follow-up: {entry.followUpDate || "Date pending"}{entry.followUpTime ? ` at ${entry.followUpTime}` : ""}
+                                     </div>
+                                   )}
+                                   {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{entry.description}</div>}
                         </div>
                         <button type="button" onClick={() => setRowActionDeleteModal({ index: originalIndex, action: entry })} style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer" }} aria-label={`Delete ${entry.title}`}>
                           x
@@ -1895,8 +1990,9 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const downloadExcel = () => {
     const allCols: Record<string, (a: Activity) => any> = {
       "Account Name":  (a) => a.accountName,
-      "Activity Name": (a) => a.activityName,
-      "Date":          (a) => a.activityDate,
+      "Lead Name": (a) => a.activityName,
+      "Start Date":    (a) => a.activityDate,
+      "End Date":      (a) => (a as any).endDate || "",
       "Stage":         (a) => a.stage,
       "Handled By":    (a) => a.handledBy,
       "Notes":         (a) => normalizeActionTextRichV2(a.notes || ""),
@@ -1908,8 +2004,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     );
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Activities");
-    XLSX.writeFile(wb, `Activities_${new Date().toISOString().slice(0,10)}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Leads");
+    XLSX.writeFile(wb, `Leads_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1982,7 +2078,10 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             partnerSpocPosition: "",
             partnerEmail: "",
             partnerPhone: "",
-            status: "Active",
+            status: "Prospect",
+            prospectType: "New",
+            followUpDate: "",
+            followUpTime: "",
             remarks: clientStatus ? `Imported from activity tracker. Client status: ${clientStatus}` : "Imported from activity tracker.",
             createdAt,
             updatedAt: createdAt,
@@ -2079,7 +2178,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               This lead is not assigned to your account.
             </p>
             <button type="button" onClick={() => onNavigate("leads")} style={S.btnPrimary}>
-              Back to Leads
+              Back to Prospects
             </button>
           </div>
         </div>
@@ -2100,10 +2199,10 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
           <div style={S.leadWorkspaceEmpty}>
             <h2 style={{ margin: 0, fontSize: 22, color: "#0f172a" }}>Lead not found</h2>
             <p style={{ margin: 0, color: "#64748b", lineHeight: 1.6 }}>
-              No lead could be found for <strong>{routeLeadId}</strong>. Please return to Leads and open a valid row.
+              No prospect could be found for <strong>{routeLeadId}</strong>. Please return to Prospects and open a valid row.
             </p>
             <button type="button" onClick={() => onNavigate("leads")} style={S.btnPrimary}>
-              Back to Leads
+              Back to Prospects
             </button>
           </div>
         </div>
@@ -2140,11 +2239,11 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         <div style={S.leadInfoWrap}>
           <div style={S.leadInfoHeader}>
             <div>
-              <div style={S.leadInfoTitle}>{selectedLead.accountName || "Lead Information"}</div>
-              <div style={S.leadInfoSubtitle}>Lead ID: {selectedLead.leadId}</div>
+              <div style={S.leadInfoTitle}>{selectedLead.accountName || "Prospect Information"}</div>
+              <div style={S.leadInfoSubtitle}>Prospect ID: {selectedLead.leadId}</div>
             </div>
             <button type="button" onClick={() => onNavigate("leads")} style={S.btnOutline}>
-              Back to Leads
+              Back to Prospects
             </button>
           </div>
           <div style={S.leadInfoGrid}>
@@ -2177,7 +2276,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       <div style={S.statsBar}>
         <div style={S.statTotal}>
           <span style={S.statNum}>{scopedActivities.length}</span>
-          <span style={S.statLabel}>Total Activities</span>
+          <span style={S.statLabel}>Total Leads</span>
         </div>
         {stats.map(({ stage, count }) => (
           <div key={stage} onClick={() => setStageFilter(stageFilter === stage ? "All" : stage)}
@@ -2196,7 +2295,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             {STAGES.map(s => <option key={s}>{s}</option>)}
           </select>
           <label style={S.btnOutline}>
-            {importing ? "Importing Activities..." : "Import Activities Excel"}
+            {importing ? "Importing Leads..." : "Import Leads Excel"}
             <input
               ref={importRef}
               type="file"
@@ -2219,7 +2318,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             }}
             style={S.btnPrimary}
           >
-            + Add Activity
+            + Add Lead
           </button>
         </div>
       </div>
@@ -2228,14 +2327,14 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       {showForm && (
         <div style={S.formCard}>
           <div style={S.formHeader}>
-            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{editingId ? "Edit Activity" : "Add New Activity"}</h2>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{editingId ? "Edit Lead" : "Add New Lead"}</h2>
             <button onClick={resetForm} style={S.closeBtn}>✕</button>
           </div>
           <form onSubmit={handleSubmit}>
             {/* Original fields unchanged */}
             <div style={S.formGrid}>
               <div style={S.formField}>
-                <label style={S.fLabel}>Link to Lead *</label>
+                <label style={S.fLabel}>Link to Prospect *</label>
                 {isLeadWorkspace && selectedLead ? (
                   <input
                     style={{ ...S.fInput, background: "#f8fafc", color: "#475569" }}
@@ -2254,16 +2353,20 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                 <input style={{ ...S.fInput, background: "#f1f5f9" }} value={formData.accountName} readOnly />
               </div>
               <div style={S.formField}>
-                <label style={S.fLabel}>Activity Name *</label>
+                <label style={S.fLabel}>Lead Name *</label>
                 <input style={S.fInput} required placeholder="e.g. Discovery Call, Proposal Sent…" value={formData.activityName} onChange={e => setFormData({ ...formData, activityName: e.target.value })} />
               </div>
               <div style={S.formField}>
-                <label style={S.fLabel}>Date</label>
+                <label style={S.fLabel}>Start Date</label>
                 <input type="date" style={S.fInput} value={formData.activityDate || new Date().toISOString().slice(0, 10)} onChange={e => setFormData({ ...formData, activityDate: e.target.value })} />
               </div>
               <div style={S.formField}>
+                <label style={S.fLabel}>End Date</label>
+                <input type="date" style={S.fInput} value={(formData as any).endDate || ""} min={formData.activityDate || undefined} onChange={e => setFormData({ ...formData, endDate: e.target.value })} />
+              </div>
+              <div style={S.formField}>
                 <label style={S.fLabel}>Stage</label>
-                <select style={S.fInput} value={formData.stage} onChange={e => setFormData({ ...formData, stage: e.target.value })}>
+                <select style={S.fInput} value={formData.stage} onChange={e => setFormData({ ...formData, stage: e.target.value, ...(e.target.value === "On Hold" ? {} : { followUpDate: "", followUpTime: "" }) })}>
                   {STAGES.map(s => <option key={s}>{s}</option>)}
                 </select>
               </div>
@@ -2271,6 +2374,29 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                 <label style={S.fLabel}>Handled By</label>
                 <input style={S.fInput} value={formData.handledBy} onChange={e => setFormData({ ...formData, handledBy: e.target.value })} />
               </div>
+              {formData.stage === "On Hold" && (
+                <>
+                  <div style={S.formField}>
+                    <label style={S.fLabel}>Next Follow-up Date *</label>
+                    <input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      style={S.fInput}
+                      value={(formData as any).followUpDate || ""}
+                      onChange={e => setFormData({ ...formData, followUpDate: e.target.value })}
+                    />
+                  </div>
+                  <div style={S.formField}>
+                    <label style={S.fLabel}>Next Follow-up Time *</label>
+                    <input
+                      type="time"
+                      style={S.fInput}
+                      value={(formData as any).followUpTime || ""}
+                      onChange={e => setFormData({ ...formData, followUpTime: e.target.value })}
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             <div style={{ padding: "0 24px 20px" }}>
@@ -2574,7 +2700,13 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                 <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, marginBottom: 20 }}>
                   <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
                   
-                  <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+                  <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                    <input 
+                      type="date"
+                      value={actionDate}
+                      onChange={e => setActionDate(e.target.value)}
+                      style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 180 }}
+                    />
                     <input 
                       type="time" 
                       value={actionTime} 
@@ -2591,16 +2723,32 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                       />
                     )}
                   </div>
-
                   <div style={{ marginBottom: 16 }}>
-                    <label style={{ fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 8, display: "block" }}>Description (Optional)</label>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 8, display: "block" }}>Details * (required)</label>
                     <textarea 
                       value={actionDescription} 
                       onChange={e => setActionDescription(e.target.value)} 
+                      onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, actionDescription, setActionDescription)}
                       rows={4} 
                       style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }} 
                       placeholder="Add details here..." 
                     />
+                  </div>
+                  <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                    <input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={actionFollowUpDate}
+                      onChange={e => setActionFollowUpDate(e.target.value)}
+                      style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 180 }}
+                    />
+                    <input
+                      type="time"
+                      value={actionFollowUpTime}
+                      onChange={e => setActionFollowUpTime(e.target.value)}
+                      style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 140 }}
+                    />
+                    <div style={{ alignSelf: "center", fontSize: 12, color: "#64748b" }}>Next follow-up for this action</div>
                   </div>
 
                   <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
@@ -2717,6 +2865,11 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                                     Place: {entry.place}
                                   </div>
                                 )}
+                                {(entry.followUpDate || entry.followUpTime) && (
+                                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>
+                                    Follow-up: {entry.followUpDate || "Date pending"}{entry.followUpTime ? ` at ${entry.followUpTime}` : ""}
+                                  </div>
+                                )}
                                 {entry.description && (
                                   <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
                                     {entry.description}
@@ -2746,7 +2899,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             </>
             )}
             <div style={{ padding: "0 24px 24px", display: "flex", gap: 10 }}>
-              <button type="submit" style={S.btnPrimary}>{editingId ? "Save Changes" : "Add Activity"}</button>
+              <button type="submit" style={S.btnPrimary}>{editingId ? "Save Changes" : "Add Lead"}</button>
               <button type="button" onClick={resetForm} style={S.btnOutline}>Cancel</button>
             </div>
           </form>
@@ -2779,7 +2932,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Account Name", "Activity Name", "Date", "Stage", "Handled By", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
+                {(["Account Name", "Lead Name", "Start Date", "End Date", "Stage", "Handled By", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
                   <th key={h} style={h === "Actions" ? S.thSticky : S.th}>{h}</th>
                 ))}
               </tr>
@@ -2787,7 +2940,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             <tbody>
               {filtered.length === 0 && (
                 <tr><td colSpan={Object.values(visibleCols).filter(Boolean).length + 1} style={{ textAlign: "center", padding: "48px 0", color: "#94a3b8", fontSize: 14 }}>
-                  No activities yet. Add one to get started.
+                  No leads yet. Add one to get started.
                 </td></tr>
               )}
               {filtered.map(a => (
@@ -2796,8 +2949,9 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                     onMouseEnter={e => (e.currentTarget.style.background = "#f8fafc")}
                     onMouseLeave={e => (e.currentTarget.style.background = "")}>
                     {visibleCols["Account Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 140 }}>{a.accountName}</td>}
-                    {visibleCols["Activity Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 160 }}>{a.activityName}</td>}
-                    {visibleCols["Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{a.activityDate || "-"}</td>}
+                    {visibleCols["Lead Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 160 }}>{a.activityName}</td>}
+                    {visibleCols["Start Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{a.activityDate || "-"}</td>}
+                    {visibleCols["End Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{(a as any).endDate || "-"}</td>}
                     {visibleCols["Stage"] && <td style={S.td}>
                       <span style={{ padding: "4px 10px", borderRadius: 20, fontWeight: 600, fontSize: 12, background: STAGE_COLORS[a.stage]?.bg, color: STAGE_COLORS[a.stage]?.color, whiteSpace: "nowrap" }}>
                         {a.stage}
@@ -2809,7 +2963,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                     </td>}
                   <td style={S.tdSticky}>
                     <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
-                      <button onClick={() => onNavigate("activityDetail", a.transactionId || a.id)} style={S.txnBtn}>View Actions</button>
+                      <button onClick={() => onNavigate("activityDetail", a.transactionId || a.id)} style={S.txnBtn}>View Action</button>
                       <button onClick={() => startEdit(a)} style={S.editBtn}>Edit</button>
                       <button onClick={() => deleteActivity(a)} style={S.deleteBtn}>Delete</button>
                     </div>
@@ -2821,7 +2975,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
           </table>
         </div>
         <div style={{ marginTop: 12, fontSize: 12, color: "#94a3b8" }}>
-          Showing {filtered.length} of {scopedActivities.length} activities · <span style={{ color: "#16a34a" }}>🔥 Firebase connected</span>
+          Showing {filtered.length} of {scopedActivities.length} leads · <span style={{ color: "#16a34a" }}>🔥 Firebase connected</span>
         </div>
       </div>
 
@@ -2834,7 +2988,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               <button onClick={() => setShowColModal(false)} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#64748b" }}>✕</button>
             </div>
             {[
-              { title: "Activity Info", cols: ["Client Name", "Activity Name", "Date", "Stage", "Handled By", "Notes"] },
+              { title: "Lead Info", cols: ["Client Name", "Lead Name", "Start Date", "End Date", "Stage", "Handled By", "Notes"] },
               { title: "Deal Info (shown when Deal Mode is ON)", cols: ["Deal Value", "Due Date", "Probability"] },
             ].map(({ title, cols }) => (
               <div key={title} style={{ marginBottom: 20 }}>
@@ -2871,7 +3025,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
 
       {deleteModal && (
         <DeleteModal
-          title="Delete Activity"
+          title="Delete Lead"
           itemName={`${deleteModal.activity.activityName} — ${deleteModal.activity.accountName}`}
           onConfirm={confirmDelete}
           onCancel={() => setDeleteModal(null)}

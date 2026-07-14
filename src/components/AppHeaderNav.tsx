@@ -4,8 +4,8 @@ import { Page } from "../navigation";
 type MenuKey = "reporting" | null;
 
 const TAB_HELP: Partial<Record<Page, string>> = {
-  leads: "View and manage all client leads.\nTrack lead details and current status.",
-  transactions: "Open activities for follow-ups and actions.\nManage notes, calls, meetings, and deals.",
+  leads: "View and manage all client prospects.\nTrack prospect details and current status.",
+  transactions: "Open leads for follow-ups and actions.\nManage notes, calls, meetings, and deals.",
   deals: "Review the deal pipeline and reporting.\nTrack stage-wise progress, wins, and losses.",
   activity: "Review the admin audit history.\nSee what changed, who changed it, and when.",
 };
@@ -74,7 +74,7 @@ export default function AppHeaderNav({
           onClick={() => navigateTo("leads")}
           style={{ ...S.navTab, ...(current === "leads" ? S.navTabActive : {}) }}
         >
-          Leads
+          Prospects
         </button>
       </NavHelpButton>
 
@@ -84,7 +84,7 @@ export default function AppHeaderNav({
           onClick={() => navigateTo("transactions")}
           style={{ ...S.navTab, ...(actActive ? S.navTabActive : {}) }}
         >
-          Act
+          Leads
         </button>
       </NavHelpButton>
 

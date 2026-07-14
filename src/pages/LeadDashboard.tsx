@@ -21,13 +21,18 @@ import { canAccessLead, getAllowedLeadIds, getSessionUser, isRestrictedUser } fr
 // ─── Constants ───────────────────────────────────────────────────────────────
 const COLLECTION = "leads";
 
-const STATUSES = ["Active", "Inactive"];
+const STATUSES = ["Prospect", "Active", "Inactive", "Test", "Hold", "Converted to Deal"];
+const PROSPECT_TYPES = ["Existing Client", "New"];
 
 const STATUSES_ENGAGEMENT = ["Development", "M&S", "Consulting", "Support", "Implementation"];
 
 const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
+  Prospect: { bg: "#e0f2fe", color: "#0369a1" },
   Active:   { bg: "#dcfce7", color: "#16a34a" },
   Inactive: { bg: "#fee2e2", color: "#dc2626" },
+  Test: { bg: "#ede9fe", color: "#7c3aed" },
+  Hold: { bg: "#fef3c7", color: "#b45309" },
+  "Converted to Deal": { bg: "#dbeafe", color: "#1d4ed8" },
 };
 
 const EMPTY_LEAD = {
@@ -48,7 +53,10 @@ const EMPTY_LEAD = {
   partnerEmail: "",
   partnerCountryCode: "",
   partnerPhone: "",
-  status: "Active",
+  status: "Prospect",
+  prospectType: "",
+  followUpDate: "",
+  followUpTime: "",
   remarks: "",
 };
 
@@ -88,6 +96,9 @@ const EXCEL_MAP: Record<string, keyof typeof EMPTY_LEAD> = {
   "Partner Phone": "partnerPhone",
   "Partner Phone Number": "partnerPhone",
   "Status": "status",
+  "Prospect Type": "prospectType",
+  "Follow Up Date": "followUpDate",
+  "Follow Up Time": "followUpTime",
   "Remarks": "remarks",
 };
 
@@ -126,6 +137,13 @@ function formatPhoneWithCountryCode(countryCode?: string, phone?: string) {
   if (!code) return number;
   if (!number) return code;
   return `${code} ${number}`;
+}
+
+function isPastDateTime(date: string, time: string) {
+  if (!date) return false;
+  const now = new Date();
+  const candidate = new Date(`${date}T${time || "00:00"}`);
+  return candidate.getTime() < now.getTime();
 }
 
 function normalizeLeadText(value: string) {
@@ -325,8 +343,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const [deleteModal, setDeleteModal] = useState<{ lead: Lead; txnCount: number } | null>(null);
   const [showColModal, setShowColModal] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
-    // Lead Info
-    "Lead Date": true, "Client Name": true, "Program Name": true,
+    // Prospect Info
+    "Prospect Date": true, "Client Name": true, "Program Name": true,
     "Project Name": true,
     "Engagement Name": true, "Engagement Type": true, "Status": true, "Remarks": true,
     // Client SPOC
@@ -433,6 +451,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     if (formData.partnerPhone && !/^[\d ]+$/.test(formData.partnerPhone)) {
       errors.partnerPhone = "Phone number can contain digits and spaces only";
     }
+    if (!formData.prospectType.trim()) {
+      errors.prospectType = "Please select the prospect type";
+    }
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
       return;
@@ -441,6 +462,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     const payload = {
       ...formData,
       remarks: normalizeLeadTextRichV2(formData.remarks || ""),
+      prospectType: formData.prospectType.trim(),
+      followUpDate: "",
+      followUpTime: "",
       leadId: formData.leadId || generateLeadId(),
       leadDate: formData.leadDate || new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString(),
@@ -525,7 +549,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const downloadExcel = () => {
     // Full row map
     const allCols: Record<string, (l: Lead) => any> = {
-      "Lead Date":          (l) => l.leadDate || "",
+      "Prospect Date":      (l) => l.leadDate || "",
       "Client Name":        (l) => l.accountName,
       "Program Name":       (l) => (l as any).programName || "",
       "Project Name":       (l) => l.projectId,
@@ -540,6 +564,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       "Partner Email":      (l) => l.partnerEmail,
       "Partner Phone":      (l) => formatPhoneWithCountryCode((l as any).partnerCountryCode, l.partnerPhone),
       "Status":             (l) => l.status,
+      "Prospect Type":      (l) => (l as any).prospectType || "",
+      "Follow-up Date":     (l) => (l as any).followUpDate || "",
+      "Follow-up Time":     (l) => (l as any).followUpTime || "",
       "Remarks":            (l) => normalizeLeadTextRichV2(l.remarks || ""),
     };
     // Only export visible columns
@@ -549,8 +576,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     );
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Leads");
-    XLSX.writeFile(wb, `Leads_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Prospects");
+    XLSX.writeFile(wb, `Prospects_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   // ── Excel Import ──
@@ -574,7 +601,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
         const lead: any = {
           ...EMPTY_LEAD,
-          status: "Active",
+          status: "Prospect",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -680,7 +707,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       <div style={S.statsBar}>
         <div style={S.statTotal}>
           <span style={S.statNum}>{visibleLeads.length}</span>
-          <span style={S.statLabel}>Total Leads</span>
+          <span style={S.statLabel}>Total Prospects</span>
         </div>
         {stats.map(({ status, count }) => (
           <div
@@ -697,7 +724,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       <div style={S.actionBar}>
         <div style={S.headerRight}>
           <input
-            placeholder="Search leads…"
+            placeholder="Search prospects…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={S.searchInput}
@@ -708,7 +735,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           </select>
           <button onClick={() => setShowColModal(true)} style={S.btnOutline}>Columns</button>
           <label style={S.btnOutline}>
-            {importing ? "Importing Leads..." : "Import Leads Excel"}
+            {importing ? "Importing Prospects..." : "Import Prospects Excel"}
             <input
               ref={importRef}
               type="file"
@@ -723,7 +750,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             onClick={() => { setShowForm(true); setEditingId(null); setFormData({ ...EMPTY_LEAD }); }}
             style={S.btnPrimary}
           >
-            + Add Lead
+            + Add Prospect
           </button>
         </div>
       </div>
@@ -732,14 +759,14 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       {showForm && (
         <div style={S.formCard}>
           <div style={S.formHeader}>
-            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{editingId ? "Edit Lead" : "Add New Lead"}</h2>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{editingId ? "Edit Prospect" : "Add New Prospect"}</h2>
             <button onClick={resetForm} style={S.closeBtn}>✕</button>
           </div>
           <form onSubmit={handleSubmit}>
             <div style={S.formGrid}>
-              {/* Lead Date */}
+              {/* Prospect Date */}
               <div style={S.formField}>
-                <label style={S.fLabel}>Lead Date</label>
+                <label style={S.fLabel}>Prospect Date</label>
                 <input
                   type="date"
                   style={S.fInput}
@@ -782,9 +809,28 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
               ))}
               <div style={S.formField}>
                 <label style={S.fLabel}>Status</label>
-                <select style={S.fInput} value={formData.status} onChange={(e) => setFormData({ ...formData, status: e.target.value })}>
+                <select
+                  style={S.fInput}
+                  value={formData.status}
+                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                >
                   {STATUSES.map((s) => <option key={s}>{s}</option>)}
                 </select>
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Prospect Type *</label>
+                <select
+                  style={{ ...S.fInput, borderColor: formErrors.prospectType ? "#ef4444" : "" }}
+                  value={(formData as any).prospectType}
+                  onChange={(e) => {
+                    setFormData({ ...formData, prospectType: e.target.value });
+                    if (formErrors.prospectType) setFormErrors((p) => ({ ...p, prospectType: "" }));
+                  }}
+                >
+                  <option value="">Select prospect type</option>
+                  {PROSPECT_TYPES.map((type) => <option key={type}>{type}</option>)}
+                </select>
+                {formErrors.prospectType && <span style={{ color: "#ef4444", fontSize: 11, marginTop: 3 }}>{formErrors.prospectType}</span>}
               </div>
             </div>
 
@@ -861,7 +907,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             </div>
 
             <div style={{ padding: "0 24px 24px", display: "flex", gap: 10 }}>
-              <button type="submit" style={S.btnPrimary}>{editingId ? "Save Changes" : "Add Lead"}</button>
+              <button type="submit" style={S.btnPrimary}>{editingId ? "Save Changes" : "Add Prospect"}</button>
               <button type="button" onClick={resetForm} style={S.btnOutline}>Cancel</button>
             </div>
           </form>
@@ -874,7 +920,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Lead Date","Client Name","Program Name","Project Name","Engagement Name","Engagement Type",
+                {(["Prospect Date","Client Name","Program Name","Project Name","Engagement Name","Engagement Type",
                   "Client SPOC","Client Designation","Client Email","Client Phone",
                   "Partner SPOC","Partner Designation","Partner Email","Partner Phone",
                   "Status","Remarks"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map((h) => (
@@ -902,7 +948,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={Object.values(visibleCols).filter(Boolean).length + 1} style={{ textAlign: "center", padding: "48px 0", color: "#94a3b8", fontSize: 14 }}>
-                    No leads found. Add one or import from Excel.
+                    No prospects found. Add one or import from Excel.
                   </td>
                 </tr>
               )}
@@ -910,7 +956,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                 <tr key={lead.id} style={S.tr}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
-                  {visibleCols["Lead Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{lead.leadDate || "-"}</td>}
+                  {visibleCols["Prospect Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{lead.leadDate || "-"}</td>}
                   {visibleCols["Client Name"] && (
                     <td style={{ ...S.tdClientSticky, minWidth: 140 }}>
                       <button
@@ -954,7 +1000,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   <td style={S.tdSticky}>
                     <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
                       <button onClick={() => startEdit(lead)} style={S.editBtn}>Edit</button>
-                      <button onClick={() => onNavigate("transactions", lead.leadId)} style={S.txnBtn}>Act</button>
+                      <button onClick={() => onNavigate("transactions", lead.leadId)} style={S.txnBtn}>Lead</button>
                       <button onClick={() => deleteLead(lead)} style={S.deleteBtn}>Delete</button>
                     </div>
                   </td>
@@ -964,7 +1010,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           </table>
         </div>
         <div style={{ marginTop: 12, fontSize: 12, color: "#94a3b8" }}>
-          Showing {filtered.length} of {visibleLeads.length} leads · Logged in as <b>{user.username}</b>
+          Showing {filtered.length} of {visibleLeads.length} prospects · Logged in as <b>{user.username}</b>
           {isAdmin && <span style={{ marginLeft: 6, color: "#7c3aed" }}>👑 Admin</span>}
           &nbsp;·&nbsp;<span style={{ color: "#16a34a" }}>🔥 Connected to Firebase</span>
         </div>
@@ -980,7 +1026,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             </div>
 
             {[
-              { title: "Lead Info", cols: ["Lead Date", "Client Name", "Program Name", "Project Name", "Engagement Name", "Engagement Type", "Status", "Remarks"] },
+              { title: "Prospect Info", cols: ["Prospect Date", "Client Name", "Program Name", "Project Name", "Engagement Name", "Engagement Type", "Status", "Remarks"] },
               { title: "Client SPOC", cols: ["Client SPOC", "Client Designation", "Client Email", "Client Phone"] },
               { title: "Partner SPOC", cols: ["Partner SPOC", "Partner Designation", "Partner Email", "Partner Phone"] },
             ].map(({ title, cols }) => (
@@ -1024,10 +1070,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       {/* ── Delete Modal ── */}
       {deleteModal && (
         <DeleteModal
-          title="Delete Lead"
+          title="Delete Prospect"
           itemName={`${deleteModal.lead.leadId} — ${deleteModal.lead.accountName}`}
           warning={deleteModal.txnCount > 0
-            ? `This lead has ${deleteModal.txnCount} activity${deleteModal.txnCount > 1 ? "s" : ""}. Please delete them first before deleting this lead.`
+            ? `This prospect has ${deleteModal.txnCount} lead${deleteModal.txnCount > 1 ? "s" : ""}. Please delete them first before deleting this prospect.`
             : undefined}
           onConfirm={confirmDeleteLead}
           onCancel={() => setDeleteModal(null)}

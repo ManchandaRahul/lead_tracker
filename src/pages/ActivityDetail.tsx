@@ -46,6 +46,8 @@ type TimelineEntry = {
   date: string;
   time?: string;
   place?: string;
+  followUpDate?: string;
+  followUpTime?: string;
   createdAt: string;
   createdBy?: string;
   amount?: string;
@@ -85,6 +87,7 @@ const EMPTY_ACTIVITY = {
   accountName: "",
   activityName: "",
   activityDate: "",
+  endDate: "",
   stage: "Kickoff",
   handledBy: "",
   notes: "",
@@ -128,6 +131,9 @@ type Lead = {
   partnerCountryCode?: string;
   partnerPhone?: string;
   status?: string;
+  prospectType?: string;
+  followUpDate?: string;
+  followUpTime?: string;
   remarks?: string;
 };
 
@@ -292,6 +298,17 @@ function formatPhoneWithCountryCode(countryCode?: string, phone?: string) {
   return `${code} ${number}`;
 }
 
+function isPastSchedule(date: string, time: string) {
+  if (!date) return false;
+  const now = new Date();
+  const candidate = new Date(`${date}T${time || "00:00"}`);
+  return candidate.getTime() < now.getTime();
+}
+
+function getActionCategory(action: "Note" | "Call" | "Meeting"): TimelineCategory {
+  return action.toLowerCase() as TimelineCategory;
+}
+
 function formatDisplayDate(value?: string) {
   if (!value) return "";
   const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -313,6 +330,8 @@ function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
         date: entry.date || createdAt.slice(0, 10),
         time: entry.time || "",
         place: expandDealStageText(entry.place || ""),
+      followUpDate: entry.followUpDate || "",
+      followUpTime: entry.followUpTime || "",
       createdAt,
       createdBy: entry.createdBy || entry.actionBy || "",
       amount: entry.amount || "",
@@ -335,6 +354,8 @@ function createTimelineEntry(
     date: overrides.date || new Date().toISOString().slice(0, 10),
     time: overrides.time || "",
     place: overrides.place || "",
+    followUpDate: overrides.followUpDate || "",
+    followUpTime: overrides.followUpTime || "",
     createdAt: overrides.createdAt || new Date().toISOString(),
     createdBy: overrides.createdBy || userName,
     amount: overrides.amount || "",
@@ -412,6 +433,8 @@ export default function ActivityDetail({
   const [meetingUrl, setMeetingUrl] = useState("");
   const [actionDescription, setActionDescription] = useState("");
   const [actionDate, setActionDate] = useState(new Date().toISOString().slice(0, 10));
+  const [actionFollowUpDate, setActionFollowUpDate] = useState("");
+  const [actionFollowUpTime, setActionFollowUpTime] = useState("");
   const [timelineFilter, setTimelineFilter] = useState<"all" | TimelineCategory>("all");
   const [dealTimelineFilter, setDealTimelineFilter] = useState<DealTimelineFilter>("all");
 
@@ -453,6 +476,8 @@ export default function ActivityDetail({
       setMeetingMode("offline");
       setMeetingPlace("");
       setMeetingUrl("");
+      setActionFollowUpDate("");
+      setActionFollowUpTime("");
       setTimelineFilter("all");
       setDealTimelineFilter("all");
       setSaveFeedback(null);
@@ -733,7 +758,7 @@ export default function ActivityDetail({
         return;
       }
       setShowEdit(false);
-      setSaveFeedback({ type: "success", message: "Activity updated successfully." });
+      setSaveFeedback({ type: "success", message: "Lead updated successfully." });
     } catch (error) {
       setSaveFeedback({ type: "error", message: "Failed to save changes. Please try again." });
     } finally {
@@ -748,6 +773,14 @@ export default function ActivityDetail({
       setSaveFeedback({ type: "error", message: `Please enter ${activeAction.toLowerCase()} details before saving.` });
       return;
     }
+    if ((actionFollowUpDate && !actionFollowUpTime) || (!actionFollowUpDate && actionFollowUpTime)) {
+      setSaveFeedback({ type: "error", message: "Please enter both follow-up date and follow-up time." });
+      return;
+    }
+    if (actionFollowUpDate && actionFollowUpTime && isPastSchedule(actionFollowUpDate, actionFollowUpTime)) {
+      setSaveFeedback({ type: "error", message: "Follow-up date and time cannot be in the past." });
+      return;
+    }
     if (getUtf8Size(normalizedDescription) > MAX_ACTION_DESCRIPTION_BYTES) {
       setSaveFeedback({
         type: "error",
@@ -755,7 +788,7 @@ export default function ActivityDetail({
       });
       return;
     }
-    const category = activeAction.toLowerCase() as TimelineCategory;
+    const category = getActionCategory(activeAction);
     const meetingContext =
       activeAction === "Meeting"
         ? meetingMode === "online"
@@ -766,6 +799,8 @@ export default function ActivityDetail({
       date: actionDate,
       time: actionTime,
       place: meetingContext,
+      followUpDate: actionFollowUpDate,
+      followUpTime: actionFollowUpTime,
     });
     const nextDraft = {
       ...draft,
@@ -774,7 +809,7 @@ export default function ActivityDetail({
     if (getUtf8Size(nextDraft) > MAX_TRANSACTION_DOCUMENT_BYTES) {
       setSaveFeedback({
         type: "error",
-        message: "This activity is too large to save as one record. Please shorten the note or split it into multiple smaller entries.",
+        message: "This lead is too large to save as one record. Please shorten the note or split it into multiple smaller entries.",
       });
       return;
     }
@@ -794,6 +829,8 @@ export default function ActivityDetail({
     setMeetingMode("offline");
     setMeetingPlace("");
     setMeetingUrl("");
+    setActionFollowUpDate("");
+    setActionFollowUpTime("");
   };
 
   const saveDeal = async () => {
@@ -885,12 +922,12 @@ export default function ActivityDetail({
       <div style={S.page}>
         <AppPageHeader current="transactions" onNavigate={onNavigate} isAdmin={isAdmin} onLogout={logout} />
         <div style={S.notFoundCard}>
-          <h2 style={{ margin: 0, fontSize: 22, color: "#0f172a" }}>Activity not found</h2>
+          <h2 style={{ margin: 0, fontSize: 22, color: "#0f172a" }}>Lead not found</h2>
           <p style={{ margin: 0, color: "#64748b", lineHeight: 1.6 }}>
-            No activity could be found for <strong>{routeActivityId}</strong>.
+            No lead could be found for <strong>{routeActivityId}</strong>.
           </p>
           <button type="button" onClick={() => onNavigate("transactions")} style={S.btnPrimary}>
-            Back to Activities
+            Back to Leads
           </button>
         </div>
       </div>
@@ -904,10 +941,10 @@ export default function ActivityDetail({
         <div style={S.notFoundCard}>
           <h2 style={{ margin: 0, fontSize: 22, color: "#0f172a" }}>Access denied</h2>
           <p style={{ margin: 0, color: "#64748b", lineHeight: 1.6 }}>
-            This activity belongs to a lead that is not assigned to your account.
+            This lead belongs to a prospect that is not assigned to your account.
           </p>
           <button type="button" onClick={() => onNavigate("leads")} style={S.btnPrimary}>
-            Back to Leads
+            Back to Prospects
           </button>
         </div>
       </div>
@@ -921,7 +958,7 @@ export default function ActivityDetail({
       <div style={S.content}>
         <div style={S.breadcrumbRow}>
           <div style={S.breadcrumbs}>
-            <button type="button" onClick={() => onNavigate("transactions")} style={S.breadcrumbBtn}>Activities</button>
+            <button type="button" onClick={() => onNavigate("transactions")} style={S.breadcrumbBtn}>Leads</button>
             <span style={S.breadcrumbSlash}>/</span>
             <span style={S.breadcrumbCurrent}>{draft.transactionId}</span>
           </div>
@@ -934,7 +971,7 @@ export default function ActivityDetail({
               Back
             </button>
             <button type="button" onClick={() => setShowEdit((prev) => !prev)} style={S.btnOutline}>
-              {showEdit ? "Close Edit" : "Edit Activity"}
+              {showEdit ? "Close Edit" : "Edit Lead"}
             </button>
             <button type="button" onClick={() => setDeleteModalOpen(true)} style={S.deleteActionBtn}>
               Delete
@@ -960,19 +997,23 @@ export default function ActivityDetail({
 
         {showEdit && (
           <div style={S.editCard}>
-            <h3 style={S.cardTitle}>Edit Activity</h3>
+            <h3 style={S.cardTitle}>Edit Lead</h3>
             <div style={S.formGrid}>
               <div style={S.formField}>
                 <label style={S.fLabel}>Account Name</label>
                 <input style={S.fInput} value={draft.accountName} onChange={(e) => setDraft({ ...draft, accountName: e.target.value })} />
               </div>
               <div style={S.formField}>
-                <label style={S.fLabel}>Activity Name</label>
+                <label style={S.fLabel}>Lead Name</label>
                 <input style={S.fInput} value={draft.activityName} onChange={(e) => setDraft({ ...draft, activityName: e.target.value })} />
               </div>
               <div style={S.formField}>
-                <label style={S.fLabel}>Date</label>
+                <label style={S.fLabel}>Start Date</label>
                 <input type="date" style={S.fInput} value={draft.activityDate} onChange={(e) => setDraft({ ...draft, activityDate: e.target.value })} />
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>End Date</label>
+                <input type="date" min={draft.activityDate || undefined} style={S.fInput} value={(draft as any).endDate || ""} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} />
               </div>
               <div style={S.formField}>
                 <label style={S.fLabel}>Stage</label>
@@ -1000,7 +1041,7 @@ export default function ActivityDetail({
 
         {selectedLead && (
           <div style={S.summaryCard}>
-            <h2 style={S.cardTitle}>Lead Information</h2>
+            <h2 style={S.cardTitle}>Prospect Information</h2>
             <div style={S.summaryGrid}>
               {[
                 ["Client Name", selectedLead.accountName],
@@ -1029,13 +1070,14 @@ export default function ActivityDetail({
         )}
 
         <div style={S.summaryCard}>
-          <h2 style={S.cardTitle}>Activity Summary</h2>
+          <h2 style={S.cardTitle}>Lead Summary</h2>
           <div style={S.summaryGrid}>
             {[
-              ["Activity Name", draft.activityName],
+              ["Lead Name", draft.activityName],
               ["Account Name", draft.accountName],
-              ["Lead ID", draft.leadId],
-              ["Date", draft.activityDate],
+              ["Prospect ID", draft.leadId],
+              ["Start Date", draft.activityDate],
+              ["End Date", (draft as any).endDate],
               ["Stage", draft.stage],
               ["Handled By", draft.handledBy],
               ["Notes", draft.notes],
@@ -1091,6 +1133,8 @@ export default function ActivityDetail({
                   setMeetingMode("offline");
                   setMeetingPlace("");
                   setMeetingUrl("");
+                  setActionFollowUpDate("");
+                  setActionFollowUpTime("");
                 }}
                 style={S.quickBtn}
               >
@@ -1293,7 +1337,8 @@ export default function ActivityDetail({
           {activeAction && (
             <div style={S.inlineActionCard}>
               <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
-              <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+              <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                <input type="date" value={actionDate} onChange={(e) => setActionDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
                 <input type="time" value={actionTime} onChange={(e) => setActionTime(e.target.value)} style={{ ...S.fInput, width: 140 }} />
                 {activeAction === "Meeting" && (
                   <select value={meetingMode} onChange={(e) => setMeetingMode(e.target.value as "offline" | "online")} style={{ ...S.fInput, width: 160 }}>
@@ -1324,7 +1369,6 @@ export default function ActivityDetail({
                 </div>
               )}
               <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-                <input type="date" value={actionDate} onChange={(e) => setActionDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
                 <textarea
                   rows={4}
                   placeholder={`Describe this ${activeAction.toLowerCase()}...`}
@@ -1333,6 +1377,12 @@ export default function ActivityDetail({
                   onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, actionDescription, setActionDescription)}
                   style={{ ...S.fInput, flex: 1, resize: "vertical" }}
                 />
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b", marginTop: -8, marginBottom: 16 }}>Details are required before saving this action.</div>
+              <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                <input type="date" min={new Date().toISOString().slice(0, 10)} value={actionFollowUpDate} onChange={(e) => setActionFollowUpDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
+                <input type="time" value={actionFollowUpTime} onChange={(e) => setActionFollowUpTime(e.target.value)} style={{ ...S.fInput, width: 140 }} />
+                <div style={{ alignSelf: "center", fontSize: 12, color: "#64748b" }}>Next follow-up for this action</div>
               </div>
               <div style={{ display: "flex", gap: 10 }}>
                 <button type="button" onClick={saveAction} style={S.btnPrimary}>Save {activeAction}</button>
@@ -1343,6 +1393,8 @@ export default function ActivityDetail({
                     setMeetingMode("offline");
                     setMeetingPlace("");
                     setMeetingUrl("");
+                    setActionFollowUpDate("");
+                    setActionFollowUpTime("");
                   }}
                   style={S.btnOutline}
                 >
@@ -1441,6 +1493,11 @@ export default function ActivityDetail({
                             )}
                             <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: entry.description ? 4 : 0, overflowWrap: "anywhere", wordBreak: "break-word" }}>{entry.title}</div>
                             {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, overflowWrap: "anywhere", wordBreak: "break-word" }}>Place: {entry.place}</div>}
+                            {(entry.followUpDate || entry.followUpTime) && (
+                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, overflowWrap: "anywhere", wordBreak: "break-word" }}>
+                                Follow-up: {entry.followUpDate ? formatDisplayDate(entry.followUpDate) : "Date pending"}{entry.followUpTime ? ` at ${entry.followUpTime}` : ""}
+                              </div>
+                            )}
                             {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, overflowWrap: "anywhere", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>{entry.description}</div>}
                         </div>
                         <button type="button" onClick={() => setActionDeleteModal({ index: originalIndex, action: entry })} style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start" }}>×</button>
@@ -1476,7 +1533,7 @@ export default function ActivityDetail({
 
       {deleteModalOpen && (
         <DeleteModal
-          title="Delete Activity"
+          title="Delete Lead"
           itemName={`${selectedActivity.activityName} — ${selectedActivity.accountName}`}
           onConfirm={confirmDeleteActivity}
           onCancel={() => setDeleteModalOpen(false)}
