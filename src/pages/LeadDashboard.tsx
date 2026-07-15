@@ -146,6 +146,54 @@ function isPastDateTime(date: string, time: string) {
   return candidate.getTime() < now.getTime();
 }
 
+function normalizeMatchValue(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function normalizeEmail(value: unknown) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizePhone(value: unknown) {
+  return String(value || "").replace(/[^\d]/g, "");
+}
+
+function getLeadImportIdentity(lead: Partial<typeof EMPTY_LEAD>) {
+  if (String(lead.leadId || "").trim()) return `leadId:${String(lead.leadId).trim()}`;
+  const email = normalizeEmail(lead.clientEmail);
+  if (email) return `email:${email}`;
+  const accountName = normalizeMatchValue(lead.accountName);
+  const projectId = normalizeMatchValue(lead.projectId);
+  if (accountName && projectId) return `accountProject:${accountName}::${projectId}`;
+  const phone = normalizePhone(lead.clientPhone);
+  if (accountName && phone) return `accountPhone:${accountName}::${phone}`;
+  if (accountName) return `account:${accountName}`;
+  return "";
+}
+
+function mergeImportedLead(existingLead: Lead, importedLead: Partial<typeof EMPTY_LEAD>) {
+  const merged: any = { ...existingLead };
+  for (const key of Object.keys(EMPTY_LEAD) as Array<keyof typeof EMPTY_LEAD>) {
+    const nextValue = importedLead[key];
+    if (typeof nextValue === "string") {
+      if (nextValue.trim() !== "") {
+        merged[key] = nextValue;
+      }
+    } else if (nextValue !== undefined && nextValue !== null) {
+      merged[key] = nextValue;
+    }
+  }
+  merged.leadId = existingLead.leadId || importedLead.leadId || generateLeadId();
+  merged.createdAt = existingLead.createdAt || new Date().toISOString();
+  merged.updatedAt = new Date().toISOString();
+  return merged;
+}
+
 function normalizeLeadText(value: string) {
   const lines = String(value || "")
     .replace(/\r\n?/g, "\n")
@@ -593,7 +641,38 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
 
-      let count = 0;
+      const existingByLeadId = new Map<string, Lead>();
+      const existingByEmail = new Map<string, Lead>();
+      const existingByAccountProject = new Map<string, Lead>();
+      const existingByAccountPhone = new Map<string, Lead>();
+      const existingByAccount = new Map<string, Lead>();
+      const seenImportKeys = new Set<string>();
+
+      for (const existingLead of leads) {
+        const existingLeadId = String(existingLead.leadId || "").trim();
+        if (existingLeadId) existingByLeadId.set(existingLeadId, existingLead);
+
+        const existingEmail = normalizeEmail(existingLead.clientEmail);
+        if (existingEmail) existingByEmail.set(existingEmail, existingLead);
+
+        const existingAccountName = normalizeMatchValue(existingLead.accountName);
+        const existingProjectId = normalizeMatchValue(existingLead.projectId);
+        const existingPhone = normalizePhone(existingLead.clientPhone);
+
+        if (existingAccountName && existingProjectId) {
+          existingByAccountProject.set(`${existingAccountName}::${existingProjectId}`, existingLead);
+        }
+        if (existingAccountName && existingPhone) {
+          existingByAccountPhone.set(`${existingAccountName}::${existingPhone}`, existingLead);
+        }
+        if (existingAccountName) {
+          existingByAccount.set(existingAccountName, existingLead);
+        }
+      }
+
+      let createdCount = 0;
+      let updatedCount = 0;
+      let skippedCount = 0;
       for (const row of rows) {
         const normalizedRow = Object.fromEntries(
           Object.entries(row).map(([column, value]) => [normalizeExcelHeader(column), value])
@@ -623,6 +702,47 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
         ));
         if (!hasContent) continue;
 
+        const importIdentity = getLeadImportIdentity(lead);
+        if (importIdentity) {
+          if (seenImportKeys.has(importIdentity)) {
+            skippedCount++;
+            continue;
+          }
+          seenImportKeys.add(importIdentity);
+        }
+
+        let matchedLead: Lead | undefined;
+        const leadId = String(lead.leadId || "").trim();
+        const email = normalizeEmail(lead.clientEmail);
+        const accountName = normalizeMatchValue(lead.accountName);
+        const projectId = normalizeMatchValue(lead.projectId);
+        const phone = normalizePhone(lead.clientPhone);
+
+        if (leadId) matchedLead = existingByLeadId.get(leadId);
+        if (!matchedLead && email) matchedLead = existingByEmail.get(email);
+        if (!matchedLead && accountName && projectId) {
+          matchedLead = existingByAccountProject.get(`${accountName}::${projectId}`);
+        }
+        if (!matchedLead && accountName && phone) {
+          matchedLead = existingByAccountPhone.get(`${accountName}::${phone}`);
+        }
+        if (!matchedLead && accountName) {
+          matchedLead = existingByAccount.get(accountName);
+        }
+
+        if (matchedLead) {
+          const mergedLead = mergeImportedLead(matchedLead, lead);
+          await updateDoc(doc(db, COLLECTION, matchedLead.id), mergedLead);
+          await logActivity(mergedLead.leadId, mergedLead.accountName, "leads", {
+            actionType: "LEAD_EDITED",
+            description: `Lead "${mergedLead.accountName}" updated from Excel import`,
+            actionBy: user.username,
+            timestamp: new Date().toISOString(),
+          });
+          updatedCount++;
+          continue;
+        }
+
         if (!lead.leadId) lead.leadId = generateLeadId();
 
         await addDoc(collection(db, COLLECTION), lead);
@@ -633,11 +753,13 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           actionBy: user.username,
           timestamp: new Date().toISOString(),
         });
-        count++;
+        createdCount++;
       }
-      setImportResult(`✅ Imported ${count} lead${count !== 1 ? "s" : ""} successfully.`);
+      setImportResult(
+        `Import complete. ${createdCount} new lead${createdCount !== 1 ? "s" : ""} created, ${updatedCount} existing lead${updatedCount !== 1 ? "s" : ""} updated, ${skippedCount} duplicate row${skippedCount !== 1 ? "s" : ""} skipped.`
+      );
     } catch (err) {
-      setImportResult("❌ Import failed. Check your Excel format.");
+      setImportResult("Import failed. Check your Excel format.");
     } finally {
       setImporting(false);
       if (importRef.current) importRef.current.value = "";
