@@ -445,6 +445,13 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     return () => { unsub(); unsubTxn(); };
   }, []);
 
+  useEffect(() => {
+    if (!editingId || !importResult) return;
+    const latestLead = leads.find((lead) => lead.id === editingId);
+    if (!latestLead) return;
+    setFormData({ ...latestLead });
+  }, [leads, editingId, importResult]);
+
   const openLeadActions = (lead: Lead) => {
     if (!canAccessLead(user, lead.leadId)) return;
 
