@@ -163,6 +163,18 @@ function normalizePhone(value: unknown) {
   return String(value || "").replace(/[^\d]/g, "");
 }
 
+function normalizeImportedStatus(value: unknown) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "prospect") return "Prospect";
+  if (normalized === "active") return "Active";
+  if (normalized === "inactive" || normalized === "in-active") return "Inactive";
+  if (normalized === "test") return "Test";
+  if (normalized === "hold" || normalized === "on hold") return "Hold";
+  if (normalized === "converted to deal" || normalized === "converted") return "Converted to Deal";
+  return String(value || "").trim();
+}
+
 function getLeadImportIdentity(lead: Partial<typeof EMPTY_LEAD>) {
   if (String(lead.leadId || "").trim()) return `leadId:${String(lead.leadId).trim()}`;
   const email = normalizeEmail(lead.clientEmail);
@@ -192,6 +204,15 @@ function mergeImportedLead(existingLead: Lead, importedLead: Partial<typeof EMPT
   merged.createdAt = existingLead.createdAt || new Date().toISOString();
   merged.updatedAt = new Date().toISOString();
   return merged;
+}
+
+function hasImportedLeadChanges(existingLead: Lead, mergedLead: Lead) {
+  for (const key of Object.keys(EMPTY_LEAD) as Array<keyof typeof EMPTY_LEAD>) {
+    if (String(existingLead[key] || "") !== String(mergedLead[key] || "")) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function normalizeLeadText(value: string) {
@@ -672,7 +693,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
       let createdCount = 0;
       let updatedCount = 0;
-      let skippedCount = 0;
+      let duplicateSkippedCount = 0;
+      let unchangedSkippedCount = 0;
       for (const row of rows) {
         const normalizedRow = Object.fromEntries(
           Object.entries(row).map(([column, value]) => [normalizeExcelHeader(column), value])
@@ -697,6 +719,13 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
         if (normalizedRow["phonenumber1"] !== undefined) lead.partnerPhone = String(normalizedRow["phonenumber1"]).trim();
         if (normalizedRow["spocposition1"] !== undefined) lead.partnerSpocPosition = String(normalizedRow["spocposition1"]).trim();
 
+        const unnamedStatus = normalizeImportedStatus(normalizedRow["empty"]);
+        if (unnamedStatus && STATUSES.includes(unnamedStatus)) {
+          lead.status = unnamedStatus;
+        } else {
+          lead.status = normalizeImportedStatus(lead.status || "Prospect") || "Prospect";
+        }
+
         const hasContent = Object.entries(lead).some(([key, value]) => (
           !["createdAt", "updatedAt", "status"].includes(key) && String(value || "").trim() !== ""
         ));
@@ -705,7 +734,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
         const importIdentity = getLeadImportIdentity(lead);
         if (importIdentity) {
           if (seenImportKeys.has(importIdentity)) {
-            skippedCount++;
+            duplicateSkippedCount++;
             continue;
           }
           seenImportKeys.add(importIdentity);
@@ -732,6 +761,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
         if (matchedLead) {
           const mergedLead = mergeImportedLead(matchedLead, lead);
+          if (!hasImportedLeadChanges(matchedLead, mergedLead)) {
+            unchangedSkippedCount++;
+            continue;
+          }
           await updateDoc(doc(db, COLLECTION, matchedLead.id), mergedLead);
           await logActivity(mergedLead.leadId, mergedLead.accountName, "leads", {
             actionType: "LEAD_EDITED",
@@ -756,7 +789,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
         createdCount++;
       }
       setImportResult(
-        `Import complete. ${createdCount} new lead${createdCount !== 1 ? "s" : ""} created, ${updatedCount} existing lead${updatedCount !== 1 ? "s" : ""} updated, ${skippedCount} duplicate row${skippedCount !== 1 ? "s" : ""} skipped.`
+        `Import complete. ${createdCount} new lead${createdCount !== 1 ? "s" : ""} created, ${updatedCount} existing lead${updatedCount !== 1 ? "s" : ""} updated, ${unchangedSkippedCount} unchanged row${unchangedSkippedCount !== 1 ? "s" : ""} skipped, ${duplicateSkippedCount} duplicate row${duplicateSkippedCount !== 1 ? "s" : ""} skipped.`
       );
     } catch (err) {
       setImportResult("Import failed. Check your Excel format.");
