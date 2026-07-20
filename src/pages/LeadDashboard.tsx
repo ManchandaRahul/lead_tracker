@@ -7,6 +7,7 @@ import {
   updateDoc,
   deleteDoc,
   doc,
+  setDoc,
 } from "firebase/firestore";
 import { logActivity } from "../firebase/activityLog";
 import { signOut } from "firebase/auth";
@@ -20,6 +21,7 @@ import { canAccessLead, getAllowedLeadIds, getSessionUser, isRestrictedUser } fr
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const COLLECTION = "leads";
+const LINKED_LEAD_COLLECTION = "prospectLinkedLeads";
 
 const STATUSES = ["Prospect", "Active", "Inactive", "Test", "Hold", "Converted to Deal"];
 const PROSPECT_TYPES = ["Existing Client", "New"];
@@ -85,6 +87,28 @@ type LeadTransactionRef = {
   createdAt?: string;
   updatedAt?: string;
 };
+type ProspectLinkedLead = {
+  linkedLeadId: string;
+  prospectLeadId: string;
+  prospectDocId: string;
+  accountName: string;
+  programName: string;
+  projectName: string;
+  engagementName: string;
+  engagementType: string;
+  source: "prospect";
+  createdAt: string;
+  updatedAt: string;
+};
+
+function getLeadDisplayDetails(lead: Partial<Lead>, linkedLead?: Partial<ProspectLinkedLead> | null) {
+  return {
+    programName: String(linkedLead?.programName || (lead as any).programName || "").trim(),
+    projectName: String(linkedLead?.projectName || (lead as any).projectId || "").trim(),
+    engagementName: String(linkedLead?.engagementName || (lead as any).engagementName || "").trim(),
+    engagementType: String(linkedLead?.engagementType || (lead as any).engagementType || "").trim(),
+  };
+}
 
 // ─── Excel column → field mapping ────────────────────────────────────────────
 const EXCEL_MAP: Record<string, keyof typeof EMPTY_LEAD> = {
@@ -243,6 +267,35 @@ function createLeadTimelineEntry(
     followUpDate: overrides.followUpDate || "",
     followUpTime: overrides.followUpTime || "",
   };
+}
+
+function buildProspectLinkedLeadPayload(
+  lead: Partial<Lead>,
+  prospectDocId: string,
+  detailSource?: Partial<Lead>
+): ProspectLinkedLead | null {
+  const linkedLeadId = String(lead.leadId || "").trim();
+  if (!linkedLeadId) return null;
+  const now = new Date().toISOString();
+  const details = detailSource || lead;
+  return {
+    linkedLeadId,
+    prospectLeadId: linkedLeadId,
+    prospectDocId,
+    accountName: String(lead.accountName || "").trim(),
+    programName: String((details as any).programName || "").trim(),
+    projectName: String((details as any).projectId || "").trim(),
+    engagementName: String((details as any).engagementName || "").trim(),
+    engagementType: String((details as any).engagementType || "").trim(),
+    source: "prospect",
+    createdAt: String((lead as any).createdAt || now),
+    updatedAt: now,
+  };
+}
+
+function buildProspectDocumentPayload(lead: Partial<Lead>) {
+  const { programName, projectId, engagementName, engagementType, ...rest } = lead as any;
+  return rest;
 }
 
 function getLeadImportIdentity(lead: Partial<typeof EMPTY_LEAD>) {
@@ -473,6 +526,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [transactions, setTransactions] = useState<LeadTransactionRef[]>([]);
+  const [linkedLeads, setLinkedLeads] = useState<Record<string, ProspectLinkedLead>>({});
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -506,6 +560,12 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const [loading, setLoading] = useState(true);
   const importRef = useRef<HTMLInputElement>(null);
 
+  const syncLinkedLeadRecord = async (lead: Partial<Lead>, prospectDocId: string, detailSource?: Partial<Lead>) => {
+    const payload = buildProspectLinkedLeadPayload(lead, prospectDocId, detailSource);
+    if (!payload) return;
+    await setDoc(doc(db, LINKED_LEAD_COLLECTION, payload.linkedLeadId), payload, { merge: true });
+  };
+
   // ── Realtime Firebase listener ──
   useEffect(() => {
     const unsub = onSnapshot(collection(db, COLLECTION), (snap) => {
@@ -522,7 +582,14 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
         }))
       );
     });
-    return () => { unsub(); unsubTxn(); };
+    const unsubLinked = onSnapshot(collection(db, LINKED_LEAD_COLLECTION), (snap) => {
+      const next: Record<string, ProspectLinkedLead> = {};
+      snap.docs.forEach((docSnap) => {
+        next[docSnap.id] = docSnap.data() as ProspectLinkedLead;
+      });
+      setLinkedLeads(next);
+    });
+    return () => { unsub(); unsubTxn(); unsubLinked(); };
   }, []);
 
   useEffect(() => {
@@ -569,15 +636,16 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
   const filtered = visibleLeads
     .filter((l) => {
+      const linkedDetails = getLeadDisplayDetails(l, linkedLeads[l.leadId]);
       if (statusFilter !== "All" && l.status !== statusFilter) return false;
       if (handledByFilter !== "All" && String((l as any).handledBy || "").trim() !== handledByFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         return (
           l.leadId?.toLowerCase().includes(q) ||
-          (l as any).programName?.toLowerCase().includes(q) ||
+          linkedDetails.programName.toLowerCase().includes(q) ||
           l.accountName?.toLowerCase().includes(q) ||
-          l.engagementName?.toLowerCase().includes(q) ||
+          linkedDetails.engagementName.toLowerCase().includes(q) ||
           l.clientSpoc?.toLowerCase().includes(q) ||
           l.partnerSpoc?.toLowerCase().includes(q) ||
           String((l as any).handledBy || "").toLowerCase().includes(q)
@@ -681,10 +749,12 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       leadDate: formData.leadDate || new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString(),
     };
+    const prospectPayload = buildProspectDocumentPayload(payload);
     setSavingLead(true);
     try {
       if (editingId) {
-        await updateDoc(doc(db, COLLECTION, editingId), payload);
+        await updateDoc(doc(db, COLLECTION, editingId), prospectPayload);
+        await syncLinkedLeadRecord(prospectPayload as Lead, editingId, payload as Lead);
         await logActivity(payload.leadId, payload.accountName, "leads", {
           actionType: "LEAD_EDITED",
           description: `Lead "${payload.accountName}" was edited`,
@@ -704,10 +774,12 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           });
         }
       } else {
-        await addDoc(collection(db, COLLECTION), {
-          ...payload,
+        const createdPayload = {
+          ...prospectPayload,
           createdAt: new Date().toISOString(),
-        });
+        };
+        const createdRef = await addDoc(collection(db, COLLECTION), createdPayload);
+        await syncLinkedLeadRecord(createdPayload as Lead, createdRef.id, { ...payload, createdAt: createdPayload.createdAt } as Lead);
         await logActivity(payload.leadId, payload.accountName, "leads", {
           actionType: "LEAD_ADDED",
           description: `New lead "${payload.accountName}" was added`,
@@ -756,6 +828,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       timestamp: new Date().toISOString(),
     });
     await deleteDoc(doc(db, COLLECTION, lead.id));
+    if (lead.leadId) {
+      await deleteDoc(doc(db, LINKED_LEAD_COLLECTION, lead.leadId));
+    }
     setDeleteModal(null);
   };
 
@@ -789,10 +864,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     const allCols: Record<string, (l: Lead) => any> = {
       "Prospect Date":      (l) => l.leadDate || "",
       "Client Name":        (l) => l.accountName,
-      "Program Name":       (l) => (l as any).programName || "",
-      "Project Name":       (l) => l.projectId,
-      "Engagement Name":    (l) => l.engagementName,
-      "Engagement Type":    (l) => l.engagementType,
+      "Program Name":       (l) => getLeadDisplayDetails(l, linkedLeads[l.leadId]).programName,
+      "Project Name":       (l) => getLeadDisplayDetails(l, linkedLeads[l.leadId]).projectName,
+      "Engagement Name":    (l) => getLeadDisplayDetails(l, linkedLeads[l.leadId]).engagementName,
+      "Engagement Type":    (l) => getLeadDisplayDetails(l, linkedLeads[l.leadId]).engagementType,
       "Handled By":         (l) => (l as any).handledBy || "",
       "URL":                (l) => (l as any).url || "",
       "Client SPOC":        (l) => l.clientSpoc,
@@ -936,7 +1011,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             unchangedSkippedCount++;
             continue;
           }
-          await updateDoc(doc(db, COLLECTION, matchedLead.id), mergedLead);
+          await updateDoc(doc(db, COLLECTION, matchedLead.id), buildProspectDocumentPayload(mergedLead));
+          await syncLinkedLeadRecord(buildProspectDocumentPayload(mergedLead) as Lead, matchedLead.id, mergedLead as Lead);
           await logActivity(mergedLead.leadId, mergedLead.accountName, "leads", {
             actionType: "LEAD_EDITED",
             description: `Lead "${mergedLead.accountName}" updated from Excel import`,
@@ -949,7 +1025,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
         if (!lead.leadId) lead.leadId = generateLeadId();
 
-        await addDoc(collection(db, COLLECTION), lead);
+        const prospectLeadPayload = buildProspectDocumentPayload(lead);
+        const leadRef = await addDoc(collection(db, COLLECTION), prospectLeadPayload);
+        await syncLinkedLeadRecord(prospectLeadPayload as Lead, leadRef.id, lead as Lead);
         // ── updated logActivity signature ──
         await logActivity(lead.leadId, lead.accountName, "leads", {
           actionType: "LEAD_ADDED",
@@ -1161,10 +1239,6 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
               {[
                 { label: "Client Name", key: "accountName", required: true },
-                { label: "Program Name", key: "programName", tooltip: "The overall program or initiative this engagement falls under" },
-                { label: "Project Name", key: "projectId" },
-                { label: "Engagement Name", key: "engagementName", tooltip: "Name of the specific engagement within the project" },
-                { label: "Engagement Type", key: "engagementType", tooltip: "e.g. M&S Project, Consulting, Support, Implementation", isEngagementType: true },
               ].map(({ label, key, placeholder, required, tooltip, isEngagementType }: any) => (
                 <div key={key} style={S.formField}>
                   <label style={S.fLabel}>
@@ -1504,6 +1578,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                 <tr key={lead.id} style={S.tr}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
+                  {(() => {
+                    const linkedDetails = getLeadDisplayDetails(lead, linkedLeads[lead.leadId]);
+                    return (
+                      <>
                   {visibleCols["Prospect Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{lead.leadDate || "-"}</td>}
                   {visibleCols["Client Name"] && (
                     <td style={{ ...S.tdClientSticky, minWidth: 140 }}>
@@ -1516,10 +1594,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                       </button>
                     </td>
                   )}
-                  {visibleCols["Program Name"] && <td style={{ ...S.td, minWidth: 140 }}>{(lead as any).programName || "-"}</td>}
-                  {visibleCols["Project Name"] && <td style={S.td}>{lead.projectId}</td>}
-                  {visibleCols["Engagement Name"] && <td style={{ ...S.td, minWidth: 160 }}>{lead.engagementName}</td>}
-                  {visibleCols["Engagement Type"] && <td style={S.td}>{lead.engagementType}</td>}
+                  {visibleCols["Program Name"] && <td style={{ ...S.td, minWidth: 140 }}>{linkedDetails.programName || "-"}</td>}
+                  {visibleCols["Project Name"] && <td style={S.td}>{linkedDetails.projectName || "-"}</td>}
+                  {visibleCols["Engagement Name"] && <td style={{ ...S.td, minWidth: 160 }}>{linkedDetails.engagementName || "-"}</td>}
+                  {visibleCols["Engagement Type"] && <td style={S.td}>{linkedDetails.engagementType || "-"}</td>}
                   {visibleCols["Handled By"] && <td style={S.td}>{(lead as any).handledBy || "-"}</td>}
                   {visibleCols["Client SPOC"] && <td style={S.td}>{lead.clientSpoc}</td>}
                   {visibleCols["Client Designation"] && <td style={S.td}>{lead.clientSpocPosition}</td>}
@@ -1566,6 +1644,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                       <button onClick={() => deleteLead(lead)} style={S.deleteBtn}>Delete</button>
                     </div>
                   </td>
+                      </>
+                    );
+                  })()}
                 </tr>
               ))}
             </tbody>

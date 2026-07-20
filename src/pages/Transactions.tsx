@@ -11,6 +11,7 @@ import { Page } from "../navigation";
 import { canAccessLead, getAllowedLeadIds, getSessionUser, isRestrictedUser } from "../accessControl";
 
 const STAGES = ["Initiation", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
+const LINKED_LEAD_COLLECTION = "prospectLinkedLeads";
 
 const STAGE_COLORS: Record<string, { bg: string; color: string }> = {
   "Initiation": { bg: "#f0fdf4", color: "#15803d" },
@@ -107,6 +108,49 @@ type Lead = {
   followUpTime?: string;
   remarks?: string;
 };
+type ProspectLinkedLead = {
+  linkedLeadId: string;
+  prospectLeadId: string;
+  prospectDocId: string;
+  accountName: string;
+  programName: string;
+  projectName: string;
+  engagementName: string;
+  engagementType: string;
+};
+
+function getLeadDisplayDetails(lead: Partial<Lead> | null | undefined, linkedLead?: Partial<ProspectLinkedLead> | null) {
+  return {
+    programName: String(linkedLead?.programName || lead?.programName || "").trim(),
+    projectName: String(linkedLead?.projectName || lead?.projectId || "").trim(),
+    engagementName: String(linkedLead?.engagementName || lead?.engagementName || "").trim(),
+    engagementType: String(linkedLead?.engagementType || lead?.engagementType || "").trim(),
+  };
+}
+
+function buildProspectDocumentPayload(lead: Partial<Lead>) {
+  const { programName, projectId, engagementName, engagementType, ...rest } = lead as any;
+  return rest;
+}
+
+function buildProspectLinkedLeadPayload(lead: Partial<Lead>, prospectDocId: string): ProspectLinkedLead | null {
+  const linkedLeadId = String(lead.leadId || "").trim();
+  if (!linkedLeadId) return null;
+  const now = new Date().toISOString();
+  return {
+    linkedLeadId,
+    prospectLeadId: linkedLeadId,
+    prospectDocId,
+    accountName: String(lead.accountName || "").trim(),
+    programName: String(lead.programName || "").trim(),
+    projectName: String(lead.projectId || "").trim(),
+    engagementName: String(lead.engagementName || "").trim(),
+    engagementType: String(lead.engagementType || "").trim(),
+    source: "prospect",
+    createdAt: String((lead as any).createdAt || now),
+    updatedAt: now,
+  };
+}
 
 function generateActivityId() {
   const d = new Date();
@@ -422,6 +466,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const [actionFollowUpDate, setActionFollowUpDate] = useState("");
   const [actionFollowUpTime, setActionFollowUpTime] = useState("");
   const [timelineFilter, setTimelineFilter] = useState<"all" | TimelineCategory>("all");
+  const [linkedLeads, setLinkedLeads] = useState<Record<string, ProspectLinkedLead>>({});
   const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -432,7 +477,14 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     const u2 = onSnapshot(collection(db, "leads"), (snap) => {
       setLeads(snap.docs.map(d => ({ id: d.id, ...d.data() } as Lead)));
     });
-    return () => { u1(); u2(); };
+    const u3 = onSnapshot(collection(db, LINKED_LEAD_COLLECTION), (snap) => {
+      const next: Record<string, ProspectLinkedLead> = {};
+      snap.docs.forEach((docSnap) => {
+        next[docSnap.id] = docSnap.data() as ProspectLinkedLead;
+      });
+      setLinkedLeads(next);
+    });
+    return () => { u1(); u2(); u3(); };
   }, []);
 
   const visibleLeads = isRestrictedUser(user)
@@ -442,6 +494,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     ? activities.filter((activity) => restrictedLeadSet.has(activity.leadId || ""))
     : activities;
   const selectedLead = routeLeadId ? visibleLeads.find((lead) => lead.leadId === routeLeadId) || null : null;
+  const selectedLeadDetails = getLeadDisplayDetails(selectedLead, selectedLead ? linkedLeads[selectedLead.leadId] : null);
   const isLeadWorkspace = !!routeLeadId;
   const scopedActivities = routeLeadId
     ? visibleActivities.filter((activity) => activity.leadId === routeLeadId)
@@ -2105,8 +2158,13 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             createdAt,
             updatedAt: createdAt,
           };
-          const leadRef = await addDoc(collection(db, "leads"), leadPayload);
-          matchedLead = { id: leadRef.id, ...leadPayload } as Lead;
+          const prospectLeadPayload = buildProspectDocumentPayload(leadPayload);
+          const leadRef = await addDoc(collection(db, "leads"), prospectLeadPayload);
+          const linkedLeadPayload = buildProspectLinkedLeadPayload(leadPayload, leadRef.id);
+          if (linkedLeadPayload) {
+            await setDoc(doc(db, LINKED_LEAD_COLLECTION, linkedLeadPayload.linkedLeadId), linkedLeadPayload, { merge: true });
+          }
+          matchedLead = { id: leadRef.id, ...(prospectLeadPayload as any) } as Lead;
           workingLeads.push(matchedLead);
           leadCreateCount++;
 
@@ -2268,10 +2326,10 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
           <div style={S.leadInfoGrid}>
             {[
               ["Client Name", selectedLead.accountName],
-              ["Program Name", selectedLead.programName],
-              ["Project Name", selectedLead.projectId],
-              ["Engagement Name", selectedLead.engagementName],
-              ["Engagement Type", selectedLead.engagementType],
+              ["Program Name", selectedLeadDetails.programName],
+              ["Project Name", selectedLeadDetails.projectName],
+              ["Engagement Name", selectedLeadDetails.engagementName],
+              ["Engagement Type", selectedLeadDetails.engagementType],
               ["Client SPOC", selectedLead.clientSpoc],
               ["Client Designation", selectedLead.clientSpocPosition],
               ["Client Email", selectedLead.clientEmail],

@@ -9,6 +9,7 @@ import { Page } from "../navigation";
 import { canAccessLead, getSessionUser } from "../accessControl";
 
 const STAGES = ["Initiation", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
+const LINKED_LEAD_COLLECTION = "prospectLinkedLeads";
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
 
 const DEAL_PIPELINE_STAGES = [
@@ -136,6 +137,25 @@ type Lead = {
   followUpTime?: string;
   remarks?: string;
 };
+type ProspectLinkedLead = {
+  linkedLeadId: string;
+  prospectLeadId: string;
+  prospectDocId: string;
+  accountName: string;
+  programName: string;
+  projectName: string;
+  engagementName: string;
+  engagementType: string;
+};
+
+function getLeadDisplayDetails(lead: Partial<Lead> | null | undefined, linkedLead?: Partial<ProspectLinkedLead> | null) {
+  return {
+    programName: String(linkedLead?.programName || lead?.programName || "").trim(),
+    projectName: String(linkedLead?.projectName || lead?.projectId || "").trim(),
+    engagementName: String(linkedLead?.engagementName || lead?.engagementName || "").trim(),
+    engagementType: String(linkedLead?.engagementType || lead?.engagementType || "").trim(),
+  };
+}
 
 function generateTimelineId() {
   return `TL_${Date.now()}_${Math.floor(Math.random() * 9000 + 1000)}`;
@@ -420,6 +440,7 @@ export default function ActivityDetail({
 
   const [activities, setActivities] = useState<Activity[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [linkedLeads, setLinkedLeads] = useState<Record<string, ProspectLinkedLead>>({});
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState({ ...EMPTY_ACTIVITY });
   const [showEdit, setShowEdit] = useState(false);
@@ -451,9 +472,17 @@ export default function ActivityDetail({
     const u2 = onSnapshot(collection(db, "leads"), (snap) => {
       setLeads(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Lead)));
     });
+    const u3 = onSnapshot(collection(db, LINKED_LEAD_COLLECTION), (snap) => {
+      const next: Record<string, ProspectLinkedLead> = {};
+      snap.docs.forEach((docSnap) => {
+        next[docSnap.id] = docSnap.data() as ProspectLinkedLead;
+      });
+      setLinkedLeads(next);
+    });
     return () => {
       u1();
       u2();
+      u3();
     };
   }, []);
 
@@ -468,6 +497,10 @@ export default function ActivityDetail({
   const selectedLead = useMemo(
     () => (selectedActivity ? leads.find((lead) => lead.leadId === selectedActivity.leadId) || null : null),
     [leads, selectedActivity]
+  );
+  const selectedLeadDetails = useMemo(
+    () => getLeadDisplayDetails(selectedLead, selectedLead ? linkedLeads[selectedLead.leadId] : null),
+    [selectedLead, linkedLeads]
   );
   const hasLeadAccess = selectedActivity ? canAccessLead(user, selectedActivity.leadId) : true;
 
@@ -1052,10 +1085,10 @@ export default function ActivityDetail({
             <div style={S.summaryGrid}>
               {[
                 ["Client Name", selectedLead.accountName],
-                ["Program Name", selectedLead.programName],
-                ["Project Name", selectedLead.projectId],
-                ["Engagement Name", selectedLead.engagementName],
-                ["Engagement Type", selectedLead.engagementType],
+                ["Program Name", selectedLeadDetails.programName],
+                ["Project Name", selectedLeadDetails.projectName],
+                ["Engagement Name", selectedLeadDetails.engagementName],
+                ["Engagement Type", selectedLeadDetails.engagementType],
                 ["Client SPOC", selectedLead.clientSpoc],
                 ["Client Designation", selectedLead.clientSpocPosition],
                 ["Client Email", selectedLead.clientEmail],
