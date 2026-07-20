@@ -8,7 +8,7 @@ import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
 import { canAccessLead, getSessionUser } from "../accessControl";
 
-const STAGES = ["Initial Call", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
+const STAGES = ["Initiation", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
 
 const DEAL_PIPELINE_STAGES = [
@@ -88,7 +88,7 @@ const EMPTY_ACTIVITY = {
   activityName: "",
   activityDate: "",
   endDate: "",
-  stage: "Kickoff",
+  stage: "Initiation",
   handledBy: "",
   notes: "",
   isDeal: false,
@@ -387,10 +387,15 @@ function getValidStageId(probability?: string) {
   return DEAL_PIPELINE_STAGES.some((stage) => stage.id === (probability || "")) ? (probability as string) : "10";
 }
 
+function normalizeStageValue(value?: string) {
+  return value === "Initial Call" ? "Initiation" : (value || "Initiation");
+}
+
 function buildActivityDraft(activity: Activity) {
   return {
     ...EMPTY_ACTIVITY,
     ...activity,
+    stage: normalizeStageValue(activity.stage),
     dealItems:
       Array.isArray((activity as any).dealItems) && (activity as any).dealItems.length > 0
         ? (activity as any).dealItems
@@ -700,6 +705,7 @@ export default function ActivityDetail({
     const previousActivity = selectedActivity;
     const basePayload = {
       ...sourceData,
+      stage: normalizeStageValue(sourceData.stage),
       notes: normalizeActionTextRichV2(sourceData.notes || ""),
       actions: normalizeTimelineEntries(sourceData.actions || []),
       transactionId: sourceData.transactionId || previousActivity.transactionId,
@@ -795,9 +801,10 @@ export default function ActivityDetail({
           ? `Online - ${meetingUrl.trim()}`
           : meetingPlace.trim()
         : "";
+    const now = new Date();
     const newAction = createTimelineEntry(user.username, category, activeAction, normalizedDescription, {
-      date: actionDate,
-      time: actionTime,
+      date: activeAction === "Note" ? now.toISOString().slice(0, 10) : actionDate,
+      time: activeAction === "Note" ? now.toTimeString().slice(0, 5) : actionTime,
       place: meetingContext,
       followUpDate: actionFollowUpDate,
       followUpTime: actionFollowUpTime,
@@ -1337,16 +1344,18 @@ export default function ActivityDetail({
           {activeAction && (
             <div style={S.inlineActionCard}>
               <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
-              <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-                <input type="date" value={actionDate} onChange={(e) => setActionDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
-                <input type="time" value={actionTime} onChange={(e) => setActionTime(e.target.value)} style={{ ...S.fInput, width: 140 }} />
-                {activeAction === "Meeting" && (
-                  <select value={meetingMode} onChange={(e) => setMeetingMode(e.target.value as "offline" | "online")} style={{ ...S.fInput, width: 160 }}>
-                    <option value="offline">Offline</option>
-                    <option value="online">Online</option>
-                  </select>
-                )}
-              </div>
+              {activeAction !== "Note" && (
+                <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                  <input type="date" value={actionDate} onChange={(e) => setActionDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
+                  <input type="time" value={actionTime} onChange={(e) => setActionTime(e.target.value)} style={{ ...S.fInput, width: 140 }} />
+                  {activeAction === "Meeting" && (
+                    <select value={meetingMode} onChange={(e) => setMeetingMode(e.target.value as "offline" | "online")} style={{ ...S.fInput, width: 160 }}>
+                      <option value="offline">Offline</option>
+                      <option value="online">Online</option>
+                    </select>
+                  )}
+                </div>
+              )}
               {activeAction === "Meeting" && (
                 <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
                   {meetingMode === "online" ? (

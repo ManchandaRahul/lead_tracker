@@ -10,10 +10,10 @@ import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
 import { canAccessLead, getAllowedLeadIds, getSessionUser, isRestrictedUser } from "../accessControl";
 
-const STAGES = ["Initial Call", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
+const STAGES = ["Initiation", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
 
 const STAGE_COLORS: Record<string, { bg: string; color: string }> = {
-  "Initial Call": { bg: "#f0fdf4", color: "#15803d" },
+  "Initiation": { bg: "#f0fdf4", color: "#15803d" },
   "Kickoff":     { bg: "#dbeafe", color: "#1d4ed8" },
   "In Progress": { bg: "#fef9c3", color: "#b45309" },
   "On Hold":     { bg: "#f3f4f6", color: "#374151" },
@@ -62,7 +62,7 @@ const EMPTY_ACTIVITY = {
   endDate: "",
   followUpDate: "",
   followUpTime: "",
-  stage: "Kickoff",
+  stage: "Initiation",
   handledBy: "",
   notes: "",
   isDeal: false,
@@ -334,8 +334,12 @@ function deriveImportedStage(...texts: string[]) {
   if (/on hold|hold currently/.test(haystack)) return "On Hold";
   if (/review/.test(haystack)) return "Review";
   if (/kickoff/.test(haystack)) return "Kickoff";
-  if (/call|discussion|proposal|follow up|follow-up|schedule|scheduled/.test(haystack)) return "Initial Call";
+  if (/call|discussion|proposal|follow up|follow-up|schedule|scheduled/.test(haystack)) return "Initiation";
   return "In Progress";
+}
+
+function normalizeStageValue(value?: string) {
+  return value === "Initial Call" ? "Initiation" : (value || "Initiation");
 }
 
 function deriveImportedActivityName(_statusText: string, projectName: string, clientName: string) {
@@ -447,6 +451,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     ...EMPTY_ACTIVITY,
     leadId: routeLeadId || "",
     accountName: selectedLead?.accountName || "",
+    handledBy: user.username || "",
   });
 
   useEffect(() => {
@@ -473,6 +478,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const buildActivityDraft = (activity: Activity) => ({
     ...EMPTY_ACTIVITY,
     ...activity,
+    stage: normalizeStageValue(activity.stage),
     dealItems: Array.isArray((activity as any).dealItems) && (activity as any).dealItems.length > 0
       ? (activity as any).dealItems
       : [createEmptyDealItem()],
@@ -685,6 +691,14 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!String(formData.activityDate || "").trim()) {
+      setImportResult("Please enter the start date before saving this lead.");
+      return;
+    }
+    if (!String(formData.handledBy || "").trim()) {
+      setImportResult("Please enter Handled By before saving this lead.");
+      return;
+    }
     if (formData.stage === "On Hold") {
       if (!formData.followUpDate || !formData.followUpTime) {
         setImportResult("Please enter the next follow-up date and time before saving an On Hold lead.");
@@ -701,6 +715,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     } else {
       const basePayload = {
         ...formData,
+        stage: normalizeStageValue(formData.stage),
         notes: normalizeActionTextRichV2(formData.notes || ""),
         actions: normalizeTimelineEntries(formData.actions || []),
         transactionId: formData.transactionId || generateActivityId(),
@@ -738,6 +753,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   ) => {
     const basePayload = {
       ...sourceData,
+      stage: normalizeStageValue(sourceData.stage),
       notes: normalizeActionTextRichV2(sourceData.notes || ""),
       actions: normalizeTimelineEntries(sourceData.actions || []),
       transactionId: sourceData.transactionId || generateActivityId(),
@@ -970,13 +986,14 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     }
 
     const category = getActionCategory(activeAction);
+    const now = new Date();
     const newAction = createTimelineEntry(
       category,
       activeAction,
       normalizedDescription,
       {
-        date: actionDate,
-        time: actionTime,
+        date: activeAction === "Note" ? now.toISOString().slice(0, 10) : actionDate,
+        time: activeAction === "Note" ? now.toTimeString().slice(0, 5) : actionTime,
         place: meetingPlace || "",
         followUpDate: actionFollowUpDate,
         followUpTime: actionFollowUpTime,
@@ -1119,9 +1136,10 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         return;
       }
       const category = getActionCategory(rowActiveAction);
+      const now = new Date();
       const newAction = createTimelineEntry(category, rowActiveAction, normalizedDescription, {
-        date: rowActionDate,
-        time: rowActionTime,
+        date: rowActiveAction === "Note" ? now.toISOString().slice(0, 10) : rowActionDate,
+        time: rowActiveAction === "Note" ? now.toTimeString().slice(0, 5) : rowActionTime,
         place: rowMeetingPlace || "",
         followUpDate: rowActionFollowUpDate,
         followUpTime: rowActionFollowUpTime,
@@ -1791,24 +1809,25 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       {activeAction && (
         <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, marginBottom: 20 }}>
           <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
-          
-          <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-            <input
-              type="time"
-              value={actionTime}
-              onChange={e => setActionTime(e.target.value)}
-              style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 140 }}
-            />
-            {activeAction === "Meeting" && (
+          {activeAction !== "Note" && (
+            <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
               <input
-                type="text"
-                placeholder="Meeting place"
-                value={meetingPlace}
-                onChange={e => setMeetingPlace(e.target.value)}
-                style={{ flex: 1, padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8 }}
+                type="time"
+                value={actionTime}
+                onChange={e => setActionTime(e.target.value)}
+                style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 140 }}
               />
-            )}
-          </div>
+              {activeAction === "Meeting" && (
+                <input
+                  type="text"
+                  placeholder="Meeting place"
+                  value={meetingPlace}
+                  onChange={e => setMeetingPlace(e.target.value)}
+                  style={{ flex: 1, padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8 }}
+                />
+              )}
+            </div>
+          )}
 
           <div style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 8, display: "block" }}>Description (Optional)</label>
@@ -2357,7 +2376,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                 <input style={S.fInput} required placeholder="e.g. Discovery Call, Proposal Sent…" value={formData.activityName} onChange={e => setFormData({ ...formData, activityName: e.target.value })} />
               </div>
               <div style={S.formField}>
-                <label style={S.fLabel}>Start Date</label>
+                <label style={S.fLabel}>Start Date *</label>
                 <input type="date" style={S.fInput} value={formData.activityDate || new Date().toISOString().slice(0, 10)} onChange={e => setFormData({ ...formData, activityDate: e.target.value })} />
               </div>
               <div style={S.formField}>
@@ -2371,7 +2390,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                 </select>
               </div>
               <div style={S.formField}>
-                <label style={S.fLabel}>Handled By</label>
+                <label style={S.fLabel}>Handled By *</label>
                 <input style={S.fInput} value={formData.handledBy} onChange={e => setFormData({ ...formData, handledBy: e.target.value })} />
               </div>
               {formData.stage === "On Hold" && (
@@ -2699,30 +2718,31 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               {activeAction && (
                 <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, marginBottom: 20 }}>
                   <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
-                  
-                  <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-                    <input 
-                      type="date"
-                      value={actionDate}
-                      onChange={e => setActionDate(e.target.value)}
-                      style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 180 }}
-                    />
-                    <input 
-                      type="time" 
-                      value={actionTime} 
-                      onChange={e => setActionTime(e.target.value)} 
-                      style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 140 }} 
-                    />
-                    {activeAction === "Meeting" && (
+                  {activeAction !== "Note" && (
+                    <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
                       <input 
-                        type="text" 
-                        placeholder="Meeting place" 
-                        value={meetingPlace} 
-                        onChange={e => setMeetingPlace(e.target.value)} 
-                        style={{ flex: 1, padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8 }} 
+                        type="date"
+                        value={actionDate}
+                        onChange={e => setActionDate(e.target.value)}
+                        style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 180 }}
                       />
-                    )}
-                  </div>
+                      <input 
+                        type="time" 
+                        value={actionTime} 
+                        onChange={e => setActionTime(e.target.value)} 
+                        style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 140 }} 
+                      />
+                      {activeAction === "Meeting" && (
+                        <input 
+                          type="text" 
+                          placeholder="Meeting place" 
+                          value={meetingPlace} 
+                          onChange={e => setMeetingPlace(e.target.value)} 
+                          style={{ flex: 1, padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8 }} 
+                        />
+                      )}
+                    </div>
+                  )}
                   <div style={{ marginBottom: 16 }}>
                     <label style={{ fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 8, display: "block" }}>Details * (required)</label>
                     <textarea 

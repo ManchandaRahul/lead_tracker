@@ -24,7 +24,7 @@ const COLLECTION = "leads";
 const STATUSES = ["Prospect", "Active", "Inactive", "Test", "Hold", "Converted to Deal"];
 const PROSPECT_TYPES = ["Existing Client", "New"];
 
-const STATUSES_ENGAGEMENT = ["Development", "M&S", "Consulting", "Support", "Implementation"];
+const STATUSES_ENGAGEMENT = ["Development", "M&S", "Consulting", "Support", "Implementation", "TBD"];
 
 const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
   Prospect: { bg: "#e0f2fe", color: "#0369a1" },
@@ -53,14 +53,32 @@ const EMPTY_LEAD = {
   partnerEmail: "",
   partnerCountryCode: "",
   partnerPhone: "",
-  status: "Prospect",
+  status: "Active",
   prospectType: "",
+  handledBy: "",
+  url: "",
+  statusComment: "",
   followUpDate: "",
   followUpTime: "",
   remarks: "",
+  actions: [] as LeadTimelineEntry[],
 };
 
 type Lead = typeof EMPTY_LEAD & { id: string; createdAt?: string };
+type TimelineCategory = "note" | "call" | "meeting";
+type LeadTimelineEntry = {
+  id: string;
+  category: TimelineCategory;
+  title: string;
+  description: string;
+  date: string;
+  time?: string;
+  place?: string;
+  createdAt: string;
+  createdBy?: string;
+  followUpDate?: string;
+  followUpTime?: string;
+};
 type LeadTransactionRef = {
   leadId: string;
   transactionId?: string;
@@ -97,6 +115,8 @@ const EXCEL_MAP: Record<string, keyof typeof EMPTY_LEAD> = {
   "Partner Phone Number": "partnerPhone",
   "Status": "status",
   "Prospect Type": "prospectType",
+  "Handled By": "handledBy",
+  "URL": "url",
   "Follow Up Date": "followUpDate",
   "Follow Up Time": "followUpTime",
   "Remarks": "remarks",
@@ -129,6 +149,10 @@ function normalizeImportedDate(value: unknown) {
   }
 
   return raw;
+}
+
+function generateTimelineId() {
+  return `TL_${Date.now()}_${Math.floor(Math.random() * 9000 + 1000)}`;
 }
 
 function formatPhoneWithCountryCode(countryCode?: string, phone?: string) {
@@ -173,6 +197,52 @@ function normalizeImportedStatus(value: unknown) {
   if (normalized === "hold" || normalized === "on hold") return "Hold";
   if (normalized === "converted to deal" || normalized === "converted") return "Converted to Deal";
   return String(value || "").trim();
+}
+
+function normalizeStageLabel(value: string) {
+  return value === "Initial Call" ? "Initiation" : value;
+}
+
+function normalizeLeadTimelineEntries(entries: any[] = []): LeadTimelineEntry[] {
+  return entries.map((entry, index) => {
+    const createdAt = entry.createdAt || entry.timestamp || new Date().toISOString();
+    const category = String(entry.category || entry.type || "note").toLowerCase() as TimelineCategory;
+    return {
+      id: entry.id || `${createdAt}_${index}`,
+      category,
+      title: normalizeStageLabel(entry.title || entry.type || category),
+      description: normalizeLeadTextRichV2(entry.description || ""),
+      date: entry.date || createdAt.slice(0, 10),
+      time: entry.time || "",
+      place: entry.place || "",
+      createdAt,
+      createdBy: entry.createdBy || entry.actionBy || "",
+      followUpDate: entry.followUpDate || "",
+      followUpTime: entry.followUpTime || "",
+    };
+  });
+}
+
+function createLeadTimelineEntry(
+  userName: string,
+  category: TimelineCategory,
+  title: string,
+  description: string,
+  overrides: Partial<LeadTimelineEntry> = {}
+): LeadTimelineEntry {
+  return {
+    id: generateTimelineId(),
+    category,
+    title,
+    description: normalizeLeadTextRichV2(description),
+    date: overrides.date || new Date().toISOString().slice(0, 10),
+    time: overrides.time || "",
+    place: overrides.place || "",
+    createdAt: overrides.createdAt || new Date().toISOString(),
+    createdBy: overrides.createdBy || userName,
+    followUpDate: overrides.followUpDate || "",
+    followUpTime: overrides.followUpTime || "",
+  };
 }
 
 function getLeadImportIdentity(lead: Partial<typeof EMPTY_LEAD>) {
@@ -409,13 +479,23 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const [formData, setFormData] = useState({ ...EMPTY_LEAD });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [savingLead, setSavingLead] = useState(false);
   const [deleteModal, setDeleteModal] = useState<{ lead: Lead; txnCount: number } | null>(null);
   const [showColModal, setShowColModal] = useState(false);
+  const [handledByFilter, setHandledByFilter] = useState("All");
+  const [expandedRemarks, setExpandedRemarks] = useState<Record<string, boolean>>({});
+  const [activeAction, setActiveAction] = useState<"Note" | "Call" | "Meeting" | null>(null);
+  const [actionDate, setActionDate] = useState(new Date().toISOString().slice(0, 10));
+  const [actionTime, setActionTime] = useState(new Date().toTimeString().slice(0, 5));
+  const [actionDescription, setActionDescription] = useState("");
+  const [actionFollowUpDate, setActionFollowUpDate] = useState("");
+  const [actionFollowUpTime, setActionFollowUpTime] = useState("");
+  const [meetingPlace, setMeetingPlace] = useState("");
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
     // Prospect Info
     "Prospect Date": true, "Client Name": true, "Program Name": true,
     "Project Name": true,
-    "Engagement Name": true, "Engagement Type": true, "Status": true, "Remarks": true,
+    "Engagement Name": true, "Engagement Type": true, "Handled By": true, "Status": true, "Remarks": true,
     // Client SPOC
     "Client SPOC": true, "Client Designation": true, "Client Email": true, "Client Phone": true,
     // Partner SPOC
@@ -478,9 +558,19 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     ? leads.filter((lead) => restrictedLeadSet.has(lead.leadId))
     : leads;
 
+  const handledByOptions = Array.from(
+    new Set(
+      visibleLeads
+        .map((lead) => String((lead as any).handledBy || "").trim())
+        .filter(Boolean)
+        .filter((value) => isAdmin || value === user.username)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+
   const filtered = visibleLeads
     .filter((l) => {
       if (statusFilter !== "All" && l.status !== statusFilter) return false;
+      if (handledByFilter !== "All" && String((l as any).handledBy || "").trim() !== handledByFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         return (
@@ -489,7 +579,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           l.accountName?.toLowerCase().includes(q) ||
           l.engagementName?.toLowerCase().includes(q) ||
           l.clientSpoc?.toLowerCase().includes(q) ||
-          l.partnerSpoc?.toLowerCase().includes(q)
+          l.partnerSpoc?.toLowerCase().includes(q) ||
+          String((l as any).handledBy || "").toLowerCase().includes(q)
         );
       }
       return true;
@@ -507,8 +598,15 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   // ── Add / Edit lead ──
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingLead) return;
     // ── Validation ──
     const errors: Record<string, string> = {};
+    if (!String(formData.leadDate || "").trim()) {
+      errors.leadDate = "Please select the prospect date";
+    }
+    if (!String((formData as any).handledBy || "").trim()) {
+      errors.handledBy = "Handled By is required";
+    }
     if (formData.clientEmail && !formData.clientEmail.includes("@")) {
       errors.clientEmail = "Please enter a valid email address containing @";
     }
@@ -527,50 +625,100 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     if (formData.partnerPhone && !/^[\d ]+$/.test(formData.partnerPhone)) {
       errors.partnerPhone = "Phone number can contain digits and spaces only";
     }
-    if (!formData.prospectType.trim()) {
+    if (formData.url && !/^https?:\/\//i.test(formData.url.trim())) {
+      errors.url = "URL must start with http:// or https://";
+    }
+    if (!editingId && !formData.prospectType.trim()) {
       errors.prospectType = "Please select the prospect type";
+    }
+    if (formData.followUpDate && formData.followUpTime && isPastDateTime(formData.followUpDate, formData.followUpTime)) {
+      errors.followUpDate = "Follow-up date and time cannot be in the past";
+    }
+    if ((formData.followUpDate && !formData.followUpTime) || (!formData.followUpDate && formData.followUpTime)) {
+      errors.followUpDate = "Please enter both follow-up date and follow-up time";
+    }
+
+    const currentClientPhone = normalizePhone(formData.clientPhone);
+    if (currentClientPhone) {
+      const duplicateLead = leads.find((lead) => lead.id !== editingId && normalizePhone(lead.clientPhone) === currentClientPhone);
+      if (duplicateLead) {
+        errors.clientPhone = `This phone number already exists for ${duplicateLead.accountName}`;
+      }
+    }
+    const currentPartnerPhone = normalizePhone(formData.partnerPhone);
+    if (currentPartnerPhone) {
+      const duplicatePartnerLead = leads.find((lead) => lead.id !== editingId && normalizePhone(lead.partnerPhone) === currentPartnerPhone);
+      if (duplicatePartnerLead) {
+        errors.partnerPhone = `This phone number already exists for ${duplicatePartnerLead.accountName}`;
+      }
     }
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
       return;
     }
     setFormErrors({});
+
+    const previousLead = editingId ? leads.find(l => l.id === editingId) || null : null;
+    let statusComment = String((formData as any).statusComment || "").trim();
+    const previousStatus = previousLead?.status || "Active";
+    if (previousStatus === "Active" && formData.status === "Inactive" && !statusComment) {
+      setFormErrors((prev) => ({
+        ...prev,
+        statusComment: "Inactive comment is required when changing status from Active to Inactive",
+      }));
+      return;
+    }
+
     const payload = {
       ...formData,
       remarks: normalizeLeadTextRichV2(formData.remarks || ""),
       prospectType: formData.prospectType.trim(),
-      followUpDate: "",
-      followUpTime: "",
+      handledBy: String((formData as any).handledBy || "").trim(),
+      url: String((formData as any).url || "").trim(),
+      statusComment,
+      actions: normalizeLeadTimelineEntries((formData as any).actions || []),
       leadId: formData.leadId || generateLeadId(),
       leadDate: formData.leadDate || new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString(),
     };
-    if (editingId) {
-      const old = leads.find(l => l.id === editingId);
-      await updateDoc(doc(db, COLLECTION, editingId), payload);
-      // ── updated logActivity signature ──
-      await logActivity(payload.leadId, payload.accountName, "leads", {
-        actionType: "LEAD_EDITED",
-        description: `Lead "${payload.accountName}" was edited`,
-        previousValue: old?.accountName,
-        newValue: payload.accountName,
-        actionBy: user.username,
-        timestamp: new Date().toISOString(),
-      });
-    } else {
-      await addDoc(collection(db, COLLECTION), {
-        ...payload,
-        createdAt: new Date().toISOString(),
-      });
-      // ── updated logActivity signature ──
-      await logActivity(payload.leadId, payload.accountName, "leads", {
-        actionType: "LEAD_ADDED",
-        description: `New lead "${payload.accountName}" was added`,
-        actionBy: user.username,
-        timestamp: new Date().toISOString(),
-      });
+    setSavingLead(true);
+    try {
+      if (editingId) {
+        await updateDoc(doc(db, COLLECTION, editingId), payload);
+        await logActivity(payload.leadId, payload.accountName, "leads", {
+          actionType: "LEAD_EDITED",
+          description: `Lead "${payload.accountName}" was edited`,
+          previousValue: previousLead?.accountName,
+          newValue: payload.accountName,
+          actionBy: user.username,
+          timestamp: new Date().toISOString(),
+        });
+        if (previousStatus !== payload.status) {
+          await logActivity(payload.leadId, payload.accountName, "leads", {
+            actionType: "LEAD_STATUS_CHANGED",
+            description: `Status changed from "${previousStatus}" to "${payload.status}"${statusComment ? `. Comment: ${statusComment}` : ""}`,
+            previousValue: previousStatus,
+            newValue: payload.status,
+            actionBy: user.username,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } else {
+        await addDoc(collection(db, COLLECTION), {
+          ...payload,
+          createdAt: new Date().toISOString(),
+        });
+        await logActivity(payload.leadId, payload.accountName, "leads", {
+          actionType: "LEAD_ADDED",
+          description: `New lead "${payload.accountName}" was added`,
+          actionBy: user.username,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      resetForm();
+    } finally {
+      setSavingLead(false);
     }
-    resetForm();
   };
 
   const resetForm = () => {
@@ -578,10 +726,15 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     setEditingId(null);
     setShowForm(false);
     setFormErrors({});
+    setActiveAction(null);
+    setActionDescription("");
+    setMeetingPlace("");
+    setActionFollowUpDate("");
+    setActionFollowUpTime("");
   };
 
   const startEdit = (lead: Lead) => {
-    setFormData({ ...lead });
+    setFormData({ ...lead, actions: normalizeLeadTimelineEntries((lead as any).actions || []) });
     setEditingId(lead.id);
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -609,11 +762,20 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   // ── Status update ──
   const updateStatus = async (lead: Lead, newStatus: string) => {
     const old = lead.status;
-    await updateDoc(doc(db, COLLECTION, lead.id), { status: newStatus, updatedAt: new Date().toISOString() });
-    // ── updated logActivity signature ──
+    let statusComment = String((lead as any).statusComment || "").trim();
+    if (old === "Active" && newStatus === "Inactive") {
+      const promptValue = window.prompt("Please enter a comment before changing this prospect from Active to Inactive.", statusComment);
+      if (!promptValue || !promptValue.trim()) return;
+      statusComment = promptValue.trim();
+    }
+    await updateDoc(doc(db, COLLECTION, lead.id), {
+      status: newStatus,
+      statusComment,
+      updatedAt: new Date().toISOString(),
+    });
     await logActivity(lead.leadId, lead.accountName, "leads", {
       actionType: "LEAD_STATUS_CHANGED",
-      description: `Status changed from "${old}" → "${newStatus}"`,
+      description: `Status changed from "${old}" → "${newStatus}"${statusComment ? `. Comment: ${statusComment}` : ""}`,
       previousValue: old,
       newValue: newStatus,
       actionBy: user.username,
@@ -631,6 +793,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       "Project Name":       (l) => l.projectId,
       "Engagement Name":    (l) => l.engagementName,
       "Engagement Type":    (l) => l.engagementType,
+      "Handled By":         (l) => (l as any).handledBy || "",
+      "URL":                (l) => (l as any).url || "",
       "Client SPOC":        (l) => l.clientSpoc,
       "Client Designation": (l) => l.clientSpocPosition,
       "Client Email":       (l) => l.clientEmail,
@@ -709,7 +873,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
         const lead: any = {
           ...EMPTY_LEAD,
-          status: "Prospect",
+          status: "Active",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -730,7 +894,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
         if (unnamedStatus && STATUSES.includes(unnamedStatus)) {
           lead.status = unnamedStatus;
         } else {
-          lead.status = normalizeImportedStatus(lead.status || "Prospect") || "Prospect";
+          lead.status = normalizeImportedStatus(lead.status || "Active") || "Active";
         }
 
         const hasContent = Object.entries(lead).some(([key, value]) => (
@@ -806,6 +970,60 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     }
   };
 
+  const openProspectAction = (type: "Note" | "Call" | "Meeting") => {
+    setActiveAction(type);
+    setActionDescription("");
+    setMeetingPlace("");
+    setActionFollowUpDate("");
+    setActionFollowUpTime("");
+    const now = new Date();
+    setActionDate(now.toISOString().slice(0, 10));
+    setActionTime(now.toTimeString().slice(0, 5));
+  };
+
+  const saveProspectAction = () => {
+    if (!activeAction) return;
+    const normalizedDescription = normalizeLeadTextRichV2(actionDescription || "");
+    if (!normalizedDescription.trim()) {
+      setFormErrors((prev) => ({ ...prev, actionDescription: `Please enter ${activeAction.toLowerCase()} details before saving.` }));
+      return;
+    }
+    if ((actionFollowUpDate && !actionFollowUpTime) || (!actionFollowUpDate && actionFollowUpTime)) {
+      setFormErrors((prev) => ({ ...prev, actionFollowUpDate: "Please enter both follow-up date and follow-up time." }));
+      return;
+    }
+    if (actionFollowUpDate && actionFollowUpTime && isPastDateTime(actionFollowUpDate, actionFollowUpTime)) {
+      setFormErrors((prev) => ({ ...prev, actionFollowUpDate: "Follow-up date and time cannot be in the past." }));
+      return;
+    }
+    const category = activeAction.toLowerCase() as TimelineCategory;
+    const now = new Date();
+    const entryDate = activeAction === "Note" ? now.toISOString().slice(0, 10) : actionDate;
+    const entryTime = activeAction === "Note" ? now.toTimeString().slice(0, 5) : actionTime;
+    const newEntry = createLeadTimelineEntry(user.username, category, activeAction, normalizedDescription, {
+      date: entryDate,
+      time: entryTime,
+      place: activeAction === "Meeting" ? meetingPlace : "",
+      followUpDate: actionFollowUpDate,
+      followUpTime: actionFollowUpTime,
+    });
+    setFormData((prev) => ({
+      ...prev,
+      actions: [...normalizeLeadTimelineEntries((prev as any).actions || []), newEntry],
+    }));
+    setFormErrors((prev) => {
+      const next = { ...prev };
+      delete next.actionDescription;
+      delete next.actionFollowUpDate;
+      return next;
+    });
+    setActiveAction(null);
+    setActionDescription("");
+    setMeetingPlace("");
+    setActionFollowUpDate("");
+    setActionFollowUpTime("");
+  };
+
   const logout = () => {
     signOut(auth);
     localStorage.removeItem("leadUser");
@@ -813,7 +1031,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   };
 
   // ── Stats ──
-  const stats = STATUSES.map((s) => ({
+  const stats = STATUSES.filter((s) => s !== "Prospect").map((s) => ({
     status: s,
     count: visibleLeads.filter((l) => l.status === s).length,
   }));
@@ -895,6 +1113,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             <option value="All">All Statuses</option>
             {STATUSES.map((s) => <option key={s}>{s}</option>)}
           </select>
+          <select value={handledByFilter} onChange={(e) => setHandledByFilter(e.target.value)} style={S.select}>
+            <option value="All">All Handled By</option>
+            {handledByOptions.map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
           <button onClick={() => setShowColModal(true)} style={S.btnOutline}>Columns</button>
           <label style={S.btnOutline}>
             {importing ? "Importing Prospects..." : "Import Prospects Excel"}
@@ -972,15 +1194,55 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
               <div style={S.formField}>
                 <label style={S.fLabel}>Status</label>
                 <select
-                  style={S.fInput}
+                  style={{ ...S.fInput, borderColor: formErrors.statusComment ? "#ef4444" : "" }}
                   value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                  onChange={(e) => {
+                    const nextStatus = e.target.value;
+                    setFormData((prev) => ({
+                      ...prev,
+                      status: nextStatus,
+                      statusComment: nextStatus === "Inactive" ? prev.statusComment : "",
+                    }));
+                    if (nextStatus !== "Inactive" && formErrors.statusComment) {
+                      setFormErrors((prev) => ({ ...prev, statusComment: "" }));
+                    }
+                  }}
                 >
                   {STATUSES.map((s) => <option key={s}>{s}</option>)}
                 </select>
               </div>
+              {formData.status === "Inactive" && (
+                <div style={S.formField}>
+                  <label style={S.fLabel}>Inactive Comment *</label>
+                  <textarea
+                    rows={3}
+                    style={{ ...S.fInput, resize: "vertical", borderColor: formErrors.statusComment ? "#ef4444" : "" }}
+                    placeholder="Why is this prospect inactive?"
+                    value={(formData as any).statusComment || ""}
+                    onChange={(e) => {
+                      setFormData({ ...formData, statusComment: e.target.value });
+                      if (formErrors.statusComment) {
+                        setFormErrors((prev) => ({ ...prev, statusComment: "" }));
+                      }
+                    }}
+                  />
+                  {formErrors.statusComment && <span style={{ color: "#ef4444", fontSize: 11, marginTop: 3 }}>{formErrors.statusComment}</span>}
+                </div>
+              )}
               <div style={S.formField}>
-                <label style={S.fLabel}>Prospect Type *</label>
+                <label style={S.fLabel}>Handled By *</label>
+                <input
+                  style={{ ...S.fInput, borderColor: formErrors.handledBy ? "#ef4444" : "" }}
+                  value={(formData as any).handledBy}
+                  onChange={(e) => {
+                    setFormData({ ...formData, handledBy: e.target.value });
+                    if (formErrors.handledBy) setFormErrors((p) => ({ ...p, handledBy: "" }));
+                  }}
+                />
+                {formErrors.handledBy && <span style={{ color: "#ef4444", fontSize: 11, marginTop: 3 }}>{formErrors.handledBy}</span>}
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Prospect Type{editingId ? "" : " *"}</label>
                 <select
                   style={{ ...S.fInput, borderColor: formErrors.prospectType ? "#ef4444" : "" }}
                   value={(formData as any).prospectType}
@@ -993,6 +1255,45 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   {PROSPECT_TYPES.map((type) => <option key={type}>{type}</option>)}
                 </select>
                 {formErrors.prospectType && <span style={{ color: "#ef4444", fontSize: 11, marginTop: 3 }}>{formErrors.prospectType}</span>}
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>URL</label>
+                <input
+                  style={{ ...S.fInput, borderColor: formErrors.url ? "#ef4444" : "" }}
+                  placeholder="https://example.com"
+                  value={(formData as any).url}
+                  onChange={(e) => {
+                    setFormData({ ...formData, url: e.target.value });
+                    if (formErrors.url) setFormErrors((p) => ({ ...p, url: "" }));
+                  }}
+                />
+                {formErrors.url && <span style={{ color: "#ef4444", fontSize: 11, marginTop: 3 }}>{formErrors.url}</span>}
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Follow-up Date</label>
+                <input
+                  type="date"
+                  min={new Date().toISOString().slice(0, 10)}
+                  style={{ ...S.fInput, borderColor: formErrors.followUpDate ? "#ef4444" : "" }}
+                  value={(formData as any).followUpDate || ""}
+                  onChange={(e) => {
+                    setFormData({ ...formData, followUpDate: e.target.value });
+                    if (formErrors.followUpDate) setFormErrors((p) => ({ ...p, followUpDate: "" }));
+                  }}
+                />
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Follow-up Time</label>
+                <input
+                  type="time"
+                  style={{ ...S.fInput, borderColor: formErrors.followUpDate ? "#ef4444" : "" }}
+                  value={(formData as any).followUpTime || ""}
+                  onChange={(e) => {
+                    setFormData({ ...formData, followUpTime: e.target.value });
+                    if (formErrors.followUpDate) setFormErrors((p) => ({ ...p, followUpDate: "" }));
+                  }}
+                />
+                {formErrors.followUpDate && <span style={{ color: "#ef4444", fontSize: 11, marginTop: 3 }}>{formErrors.followUpDate}</span>}
               </div>
             </div>
 
@@ -1068,8 +1369,93 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
               />
             </div>
 
+            <div style={{ padding: "0 24px 20px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Actions</h3>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+                {(["Note", "Call", "Meeting"] as const).map((type) => (
+                  <button key={type} type="button" onClick={() => openProspectAction(type)} style={S.quickBtn}>
+                    + {type}
+                  </button>
+                ))}
+              </div>
+              {activeAction && (
+                <div style={S.inlineActionCard}>
+                  <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
+                  {activeAction !== "Note" && (
+                    <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                      <input type="date" value={actionDate} onChange={(e) => setActionDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
+                      <input type="time" value={actionTime} onChange={(e) => setActionTime(e.target.value)} style={{ ...S.fInput, width: 140 }} />
+                    </div>
+                  )}
+                  {activeAction === "Meeting" && (
+                    <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+                      <input
+                        type="text"
+                        placeholder="Meeting place"
+                        value={meetingPlace}
+                        onChange={(e) => setMeetingPlace(e.target.value)}
+                        style={{ ...S.fInput, flex: 1 }}
+                      />
+                    </div>
+                  )}
+                  <textarea
+                    rows={4}
+                    placeholder={`Describe this ${activeAction.toLowerCase()}...`}
+                    value={actionDescription}
+                    onChange={(e) => setActionDescription(e.target.value)}
+                    onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, actionDescription, setActionDescription)}
+                    style={{ ...S.fInput, resize: "vertical", marginBottom: 8 }}
+                  />
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>Details are required before saving this action.</div>
+                  {formErrors.actionDescription && <div style={{ color: "#ef4444", fontSize: 11, marginBottom: 12 }}>{formErrors.actionDescription}</div>}
+                  <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                    <input type="date" min={new Date().toISOString().slice(0, 10)} value={actionFollowUpDate} onChange={(e) => setActionFollowUpDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
+                    <input type="time" value={actionFollowUpTime} onChange={(e) => setActionFollowUpTime(e.target.value)} style={{ ...S.fInput, width: 140 }} />
+                    <div style={{ alignSelf: "center", fontSize: 12, color: "#64748b" }}>Next follow-up for this action</div>
+                  </div>
+                  {formErrors.actionFollowUpDate && <div style={{ color: "#ef4444", fontSize: 11, marginBottom: 12 }}>{formErrors.actionFollowUpDate}</div>}
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button type="button" onClick={saveProspectAction} style={S.btnPrimary}>Save {activeAction}</button>
+                    <button type="button" onClick={() => setActiveAction(null)} style={S.btnOutline}>Cancel</button>
+                  </div>
+                </div>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "6px 0 16px" }}>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Timeline</h3>
+              </div>
+              {normalizeLeadTimelineEntries((formData as any).actions || []).length === 0 ? (
+                <div style={S.emptyTimeline}>No timeline entries yet for this prospect.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 14 }}>
+                  {normalizeLeadTimelineEntries((formData as any).actions || [])
+                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                    .map((entry) => (
+                      <div key={entry.id} style={S.timelineEntry}>
+                        <div style={S.timelineDot} />
+                        <div style={S.timelineBody}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                            <span style={S.timelinePill}>{entry.title}</span>
+                            <span style={{ fontSize: 12, color: "#64748b" }}>{entry.date}{entry.time ? ` at ${entry.time}` : ""}</span>
+                          </div>
+                          {entry.createdBy && <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Created by: {entry.createdBy}</div>}
+                          {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Place: {entry.place}</div>}
+                          {(entry.followUpDate || entry.followUpTime) && (
+                            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+                              Follow-up: {entry.followUpDate || "Date pending"}{entry.followUpTime ? ` at ${entry.followUpTime}` : ""}
+                            </div>
+                          )}
+                          <div style={{ fontSize: 13, color: "#334155", whiteSpace: "pre-wrap" }}>{entry.description}</div>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+
             <div style={{ padding: "0 24px 24px", display: "flex", gap: 10 }}>
-              <button type="submit" style={S.btnPrimary}>{editingId ? "Save Changes" : "Add Prospect"}</button>
+              <button type="submit" style={S.btnPrimary} disabled={savingLead}>{savingLead ? "Saving..." : editingId ? "Save Changes" : "Add Prospect"}</button>
               <button type="button" onClick={resetForm} style={S.btnOutline}>Cancel</button>
             </div>
           </form>
@@ -1082,7 +1468,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Prospect Date","Client Name","Program Name","Project Name","Engagement Name","Engagement Type",
+                {(["Prospect Date","Client Name","Program Name","Project Name","Engagement Name","Engagement Type","Handled By",
                   "Client SPOC","Client Designation","Client Email","Client Phone",
                   "Partner SPOC","Partner Designation","Partner Email","Partner Phone",
                   "Status","Remarks"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map((h) => (
@@ -1092,13 +1478,13 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                       {({
                         "Program Name": "The overall program or initiative this engagement falls under",
                         "Engagement Name": "Name of the specific engagement within the project",
-                        "Engagement Type": "e.g. Development, M&S, Consulting, Support, Implementation",
+                        "Engagement Type": "e.g. Development, M&S, Consulting, Support, Implementation, TBD",
 
                        
                       } as Record<string,string>)[h] && <Tooltip text={({
                         "Program Name": "The overall program or initiative this engagement falls under",
                         "Engagement Name": "Name of the specific engagement within the project",
-                        "Engagement Type": "e.g. Development, M&S, Consulting, Support, Implementation",
+                        "Engagement Type": "e.g. Development, M&S, Consulting, Support, Implementation, TBD",
                         
                       } as Record<string,string>)[h]} />}
                     </span>
@@ -1134,6 +1520,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   {visibleCols["Project Name"] && <td style={S.td}>{lead.projectId}</td>}
                   {visibleCols["Engagement Name"] && <td style={{ ...S.td, minWidth: 160 }}>{lead.engagementName}</td>}
                   {visibleCols["Engagement Type"] && <td style={S.td}>{lead.engagementType}</td>}
+                  {visibleCols["Handled By"] && <td style={S.td}>{(lead as any).handledBy || "-"}</td>}
                   {visibleCols["Client SPOC"] && <td style={S.td}>{lead.clientSpoc}</td>}
                   {visibleCols["Client Designation"] && <td style={S.td}>{lead.clientSpocPosition}</td>}
                   {visibleCols["Client Email"] && <td style={{ ...S.td, color: "#2563eb" }}>
@@ -1154,7 +1541,20 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   </td>}
                   {visibleCols["Remarks"] && <td style={{ ...S.td, minWidth: 200, maxWidth: 240, color: "#64748b", fontSize: 12, whiteSpace: "pre-wrap" }}>
                     {lead.remarks ? (
-                      <span title={normalizeLeadTextRichV2(lead.remarks)}>{getRemarksPreview(lead.remarks)}</span>
+                      <span>
+                        <span title={normalizeLeadTextRichV2(lead.remarks)}>
+                          {expandedRemarks[lead.id] ? normalizeLeadTextRichV2(lead.remarks) : getRemarksPreview(lead.remarks)}
+                        </span>
+                        {normalizeLeadTextRichV2(lead.remarks).length > 140 && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedRemarks((prev) => ({ ...prev, [lead.id]: !prev[lead.id] }))}
+                            style={{ display: "block", marginTop: 6, border: "none", background: "none", color: "#2563eb", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}
+                          >
+                            {expandedRemarks[lead.id] ? "Show less" : "Show more"}
+                          </button>
+                        )}
+                      </span>
                     ) : <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No remarks</span>}
                   </td>}
 
@@ -1188,7 +1588,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             </div>
 
             {[
-              { title: "Prospect Info", cols: ["Prospect Date", "Client Name", "Program Name", "Project Name", "Engagement Name", "Engagement Type", "Status", "Remarks"] },
+              { title: "Prospect Info", cols: ["Prospect Date", "Client Name", "Program Name", "Project Name", "Engagement Name", "Engagement Type", "Handled By", "Status", "Remarks"] },
               { title: "Client SPOC", cols: ["Client SPOC", "Client Designation", "Client Email", "Client Phone"] },
               { title: "Partner SPOC", cols: ["Partner SPOC", "Partner Designation", "Partner Email", "Partner Phone"] },
             ].map(({ title, cols }) => (
@@ -1453,6 +1853,65 @@ const S: Record<string, React.CSSProperties> = {
     color: "#0f172a",
     width: "100%",
     boxSizing: "border-box",
+  },
+  quickBtn: {
+    padding: "8px 20px",
+    borderRadius: 9999,
+    border: "1px solid #3b82f6",
+    background: "#fff",
+    color: "#3b82f6",
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  inlineActionCard: {
+    marginBottom: 18,
+    padding: "18px",
+    background: "#ffffff",
+    borderRadius: 14,
+    border: "1px solid #dbe4f0",
+    boxShadow: "0 4px 14px rgba(15,23,42,0.05)",
+  },
+  emptyTimeline: {
+    border: "1px dashed #cbd5e1",
+    borderRadius: 14,
+    padding: "22px 18px",
+    color: "#94a3b8",
+    fontSize: 14,
+    background: "#fbfdff",
+  },
+  timelineEntry: {
+    position: "relative",
+    display: "flex",
+    gap: 14,
+    alignItems: "flex-start",
+  },
+  timelineDot: {
+    width: 14,
+    height: 14,
+    borderRadius: "50%",
+    background: "#93c5fd",
+    boxShadow: "0 0 0 6px #dbeafe",
+    marginTop: 10,
+    flexShrink: 0,
+  },
+  timelineBody: {
+    flex: 1,
+    border: "1px solid #dbe4f0",
+    borderRadius: 16,
+    background: "#ffffff",
+    padding: "16px 18px",
+    boxShadow: "0 4px 14px rgba(15,23,42,0.05)",
+  },
+  timelinePill: {
+    padding: "4px 10px",
+    borderRadius: 9999,
+    background: "#eff6ff",
+    color: "#2563eb",
+    fontSize: 11,
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
   },
   tableWrap: {
     overflowX: "auto",
