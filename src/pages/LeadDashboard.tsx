@@ -574,6 +574,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const [importResult, setImportResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const importRef = useRef<HTMLInputElement>(null);
+  const formErrorSummary =
+    Object.values(formErrors).find((value) => String(value || "").trim()) ||
+    (importResult && !importResult.startsWith("✅") ? importResult : "");
 
   const syncLinkedLeadRecord = async (lead: Partial<Lead>, prospectDocId: string, detailSource?: Partial<Lead>) => {
     const payload = buildProspectLinkedLeadPayload(lead, prospectDocId, detailSource);
@@ -747,9 +750,11 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     }
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
+      setImportResult("Please fix the highlighted fields before saving.");
       return;
     }
     setFormErrors({});
+    setImportResult(null);
 
     const previousLead = editingId ? leads.find(l => l.id === editingId) || null : null;
     let statusComment = String((formData as any).statusComment || "").trim();
@@ -1580,8 +1585,27 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             </div>
 
             <div style={{ padding: "0 24px 24px", display: "flex", gap: 10 }}>
-              <button type="submit" style={S.btnPrimary} disabled={savingLead}>{savingLead ? "Saving..." : editingId ? "Save Changes" : "Add Prospect"}</button>
-              <button type="button" onClick={resetForm} style={S.btnOutline}>Cancel</button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
+                {formErrorSummary && (
+                  <div
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      background: "#fef2f2",
+                      border: "1px solid #fecaca",
+                      color: "#dc2626",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {formErrorSummary}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button type="submit" style={S.btnPrimary} disabled={savingLead}>{savingLead ? "Saving..." : editingId ? "Save Changes" : "Add Prospect"}</button>
+                  <button type="button" onClick={resetForm} style={S.btnOutline}>Cancel</button>
+                </div>
+              </div>
             </div>
           </form>
         </div>
