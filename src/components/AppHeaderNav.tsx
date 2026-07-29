@@ -6,6 +6,7 @@ type MenuKey = "reporting" | null;
 const TAB_HELP: Partial<Record<Page, string>> = {
   leads: "View and manage all client prospects.\nTrack prospect details and current status.",
   transactions: "Open leads for follow-ups and actions.\nManage notes, calls, meetings, and deals.",
+  followUps: "Track upcoming follow-ups in one place.\nReview today's, missed, and next business-day follow-ups.",
   deals: "Review the deal pipeline and reporting.\nTrack stage-wise progress, wins, and losses.",
   activity: "Review the admin audit history.\nSee what changed, who changed it, and when.",
 };
@@ -85,6 +86,16 @@ export default function AppHeaderNav({
           style={{ ...S.navTab, ...(actActive ? S.navTabActive : {}) }}
         >
           Leads
+        </button>
+      </NavHelpButton>
+
+      <NavHelpButton helpText={TAB_HELP.followUps}>
+        <button
+          type="button"
+          onClick={() => navigateTo("followUps")}
+          style={{ ...S.navTab, ...(current === "followUps" ? S.navTabActive : {}) }}
+        >
+          Follow Ups
         </button>
       </NavHelpButton>
 

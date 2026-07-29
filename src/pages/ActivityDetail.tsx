@@ -7,6 +7,7 @@ import DeleteModal from "../components/DeleteModal";
 import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
 import { canAccessLead, getSessionUser } from "../accessControl";
+import { getBusinessDayError, isBusinessDay } from "../utils/followUps";
 
 const STAGES = ["Initiation", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
 const LINKED_LEAD_COLLECTION = "prospectLinkedLeads";
@@ -51,6 +52,7 @@ type TimelineEntry = {
   followUpTime?: string;
   createdAt: string;
   createdBy?: string;
+  assignedTo?: string;
   amount?: string;
 };
 
@@ -354,6 +356,7 @@ function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
       followUpTime: entry.followUpTime || "",
       createdAt,
       createdBy: entry.createdBy || entry.actionBy || "",
+      assignedTo: entry.assignedTo || "",
       amount: entry.amount || "",
     };
   });
@@ -378,6 +381,7 @@ function createTimelineEntry(
     followUpTime: overrides.followUpTime || "",
     createdAt: overrides.createdAt || new Date().toISOString(),
     createdBy: overrides.createdBy || userName,
+    assignedTo: overrides.assignedTo || "",
     amount: overrides.amount || "",
   };
 }
@@ -461,8 +465,10 @@ export default function ActivityDetail({
   const [actionDate, setActionDate] = useState(new Date().toISOString().slice(0, 10));
   const [actionFollowUpDate, setActionFollowUpDate] = useState("");
   const [actionFollowUpTime, setActionFollowUpTime] = useState("");
+  const [actionAssignedTo, setActionAssignedTo] = useState("");
   const [timelineFilter, setTimelineFilter] = useState<"all" | TimelineCategory>("all");
   const [dealTimelineFilter, setDealTimelineFilter] = useState<DealTimelineFilter>("all");
+  const [assignableUsers, setAssignableUsers] = useState<string[]>([]);
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, "transactions"), (snap) => {
@@ -479,10 +485,18 @@ export default function ActivityDetail({
       });
       setLinkedLeads(next);
     });
+    const u4 = onSnapshot(collection(db, "users"), (snap) => {
+      const usernames = snap.docs
+        .map((docSnap) => String((docSnap.data() as any).username || "").trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+      setAssignableUsers(usernames);
+    });
     return () => {
       u1();
       u2();
       u3();
+      u4();
     };
   }, []);
 
@@ -516,6 +530,7 @@ export default function ActivityDetail({
       setMeetingUrl("");
       setActionFollowUpDate("");
       setActionFollowUpTime("");
+      setActionAssignedTo("");
       setTimelineFilter("all");
       setDealTimelineFilter("all");
       setSaveFeedback(null);
@@ -816,6 +831,10 @@ export default function ActivityDetail({
       setSaveFeedback({ type: "error", message: "Please enter both follow-up date and follow-up time." });
       return;
     }
+    if (actionFollowUpDate && !isBusinessDay(actionFollowUpDate)) {
+      setSaveFeedback({ type: "error", message: getBusinessDayError(actionFollowUpDate, "Next follow-up date") });
+      return;
+    }
     if (actionFollowUpDate && actionFollowUpTime && isPastSchedule(actionFollowUpDate, actionFollowUpTime)) {
       setSaveFeedback({ type: "error", message: "Follow-up date and time cannot be in the past." });
       return;
@@ -841,6 +860,7 @@ export default function ActivityDetail({
       place: meetingContext,
       followUpDate: actionFollowUpDate,
       followUpTime: actionFollowUpTime,
+      assignedTo: activeAction === "Note" ? actionAssignedTo : "",
     });
     const nextDraft = {
       ...draft,
@@ -856,6 +876,7 @@ export default function ActivityDetail({
     setDraft(nextDraft);
     try {
       await persistActivity(nextDraft);
+      setActionAssignedTo("");
       setSaveFeedback({ type: "success", message: `${activeAction} saved successfully.` });
     } catch (error: any) {
       setSaveFeedback({
@@ -1083,12 +1104,8 @@ export default function ActivityDetail({
           <div style={S.summaryCard}>
             <h2 style={S.cardTitle}>Prospect Information</h2>
             <div style={S.summaryGrid}>
-              {[
+              {[ 
                 ["Client Name", selectedLead.accountName],
-                ["Program Name", selectedLeadDetails.programName],
-                ["Project Name", selectedLeadDetails.projectName],
-                ["Engagement Name", selectedLeadDetails.engagementName],
-                ["Engagement Type", selectedLeadDetails.engagementType],
                 ["Client SPOC", selectedLead.clientSpoc],
                 ["Client Designation", selectedLead.clientSpocPosition],
                 ["Client Email", selectedLead.clientEmail],
@@ -1421,8 +1438,20 @@ export default function ActivityDetail({
                 />
               </div>
               <div style={{ fontSize: 12, color: "#64748b", marginTop: -8, marginBottom: 16 }}>Details are required before saving this action.</div>
+              {activeAction === "Note" && (
+                <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                  <select value={actionAssignedTo} onChange={(e) => setActionAssignedTo(e.target.value)} style={{ ...S.fInput, width: 220 }}>
+                    <option value="">Assign to user</option>
+                    {assignableUsers.map((username) => (
+                      <option key={username} value={username}>
+                        {username}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-                <input type="date" min={new Date().toISOString().slice(0, 10)} value={actionFollowUpDate} onChange={(e) => setActionFollowUpDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
+                <input type="date" min={new Date().toISOString().slice(0, 10)} value={actionFollowUpDate} onChange={(e) => setActionFollowUpDate(e.target.value)} style={{ ...S.fInput, width: 180 }} title="Business dates only: Monday to Friday" />
                 <input type="time" value={actionFollowUpTime} onChange={(e) => setActionFollowUpTime(e.target.value)} style={{ ...S.fInput, width: 140 }} />
                 <div style={{ alignSelf: "center", fontSize: 12, color: "#64748b" }}>Next follow-up for this action</div>
               </div>
@@ -1437,6 +1466,7 @@ export default function ActivityDetail({
                     setMeetingUrl("");
                     setActionFollowUpDate("");
                     setActionFollowUpTime("");
+                    setActionAssignedTo("");
                   }}
                   style={S.btnOutline}
                 >
@@ -1527,6 +1557,9 @@ export default function ActivityDetail({
                             </div>
                             {entry.createdBy && (
                               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Created by: {entry.createdBy}</div>
+                            )}
+                            {entry.assignedTo && (
+                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Assigned to: {entry.assignedTo}</div>
                             )}
                             {entry.category === "deal" && entry.amount && (
                               <div style={{ marginBottom: 8 }}>

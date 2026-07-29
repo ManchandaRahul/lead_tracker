@@ -1,4 +1,4 @@
-export type Page = "leads" | "transactions" | "activityDetail" | "deals" | "activity" | "users";
+export type Page = "leads" | "transactions" | "activityDetail" | "deals" | "activity" | "followUps" | "users";
 
 export function getPagePath(page: Page, leadId?: string) {
   switch (page) {
@@ -12,6 +12,8 @@ export function getPagePath(page: Page, leadId?: string) {
       return "/deals";
     case "activity":
       return "/activity-log";
+    case "followUps":
+      return "/follow-ups";
     case "users":
       return "/users";
     default:

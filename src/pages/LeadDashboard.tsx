@@ -18,6 +18,7 @@ import AppHeaderNav from "../components/AppHeaderNav";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import { Page } from "../navigation";
 import { canAccessLead, getAllowedLeadIds, getSessionUser, isRestrictedUser } from "../accessControl";
+import { getBusinessDayError, isBusinessDay } from "../utils/followUps";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const COLLECTION = "leads";
@@ -78,6 +79,7 @@ type LeadTimelineEntry = {
   place?: string;
   createdAt: string;
   createdBy?: string;
+  assignedTo?: string;
   followUpDate?: string;
   followUpTime?: string;
 };
@@ -241,6 +243,7 @@ function normalizeLeadTimelineEntries(entries: any[] = []): LeadTimelineEntry[] 
       place: entry.place || "",
       createdAt,
       createdBy: entry.createdBy || entry.actionBy || "",
+      assignedTo: entry.assignedTo || "",
       followUpDate: entry.followUpDate || "",
       followUpTime: entry.followUpTime || "",
     };
@@ -264,9 +267,21 @@ function createLeadTimelineEntry(
     place: overrides.place || "",
     createdAt: overrides.createdAt || new Date().toISOString(),
     createdBy: overrides.createdBy || userName,
+    assignedTo: overrides.assignedTo || "",
     followUpDate: overrides.followUpDate || "",
     followUpTime: overrides.followUpTime || "",
   };
+}
+
+function getLatestLeadAction(actions: any[] = []) {
+  return normalizeLeadTimelineEntries(actions)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] || null;
+}
+
+function getLatestAssignedLeadAction(actions: any[] = []) {
+  return normalizeLeadTimelineEntries(actions)
+    .filter((entry) => String(entry.assignedTo || "").trim())
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] || null;
 }
 
 function buildProspectLinkedLeadPayload(
@@ -545,13 +560,13 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const [actionFollowUpDate, setActionFollowUpDate] = useState("");
   const [actionFollowUpTime, setActionFollowUpTime] = useState("");
   const [meetingPlace, setMeetingPlace] = useState("");
+  const [actionAssignedTo, setActionAssignedTo] = useState("");
+  const [assignableUsers, setAssignableUsers] = useState<string[]>([]);
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
     // Prospect Info
-    "Prospect Date": true, "Client Name": true, "Program Name": true,
-    "Project Name": true,
-    "Engagement Name": true, "Engagement Type": true, "Handled By": true, "Status": true, "Remarks": true,
+    "Prospect Date": true, "Client Name": true, "Handled By": true, "Assigned To": true, "Status": true, "Last Action Comment": true, "Remarks": true,
     // Client SPOC
-    "Client SPOC": true, "Client Designation": true, "Client Email": true, "Client Phone": true,
+    "Client SPOC": true, "Client Email": true, "Client Phone": true,
     // Partner SPOC
     "Partner SPOC": true, "Partner Designation": true, "Partner Email": true, "Partner Phone": true,
   });
@@ -589,7 +604,14 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       });
       setLinkedLeads(next);
     });
-    return () => { unsub(); unsubTxn(); unsubLinked(); };
+    const unsubUsers = onSnapshot(collection(db, "users"), (snap) => {
+      const nextUsers = snap.docs
+        .map((docSnap) => String((docSnap.data() as any).username || "").trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+      setAssignableUsers(nextUsers);
+    });
+    return () => { unsub(); unsubTxn(); unsubLinked(); unsubUsers(); };
   }, []);
 
   useEffect(() => {
@@ -704,6 +726,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     }
     if ((formData.followUpDate && !formData.followUpTime) || (!formData.followUpDate && formData.followUpTime)) {
       errors.followUpDate = "Please enter both follow-up date and follow-up time";
+    }
+    if (formData.followUpDate && !isBusinessDay(formData.followUpDate)) {
+      errors.followUpDate = getBusinessDayError(formData.followUpDate);
     }
 
     const currentClientPhone = normalizePhone(formData.clientPhone);
@@ -1052,6 +1077,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     setActiveAction(type);
     setActionDescription("");
     setMeetingPlace("");
+    setActionAssignedTo("");
     setActionFollowUpDate("");
     setActionFollowUpTime("");
     const now = new Date();
@@ -1074,6 +1100,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       setFormErrors((prev) => ({ ...prev, actionFollowUpDate: "Follow-up date and time cannot be in the past." }));
       return;
     }
+    if (actionFollowUpDate && !isBusinessDay(actionFollowUpDate)) {
+      setFormErrors((prev) => ({ ...prev, actionFollowUpDate: getBusinessDayError(actionFollowUpDate) }));
+      return;
+    }
     const category = activeAction.toLowerCase() as TimelineCategory;
     const now = new Date();
     const entryDate = activeAction === "Note" ? now.toISOString().slice(0, 10) : actionDate;
@@ -1082,6 +1112,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       date: entryDate,
       time: entryTime,
       place: activeAction === "Meeting" ? meetingPlace : "",
+      assignedTo: activeAction === "Note" ? actionAssignedTo : "",
       followUpDate: actionFollowUpDate,
       followUpTime: actionFollowUpTime,
     });
@@ -1098,6 +1129,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     setActiveAction(null);
     setActionDescription("");
     setMeetingPlace("");
+    setActionAssignedTo("");
     setActionFollowUpDate("");
     setActionFollowUpTime("");
   };
@@ -1483,9 +1515,19 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                     style={{ ...S.fInput, resize: "vertical", marginBottom: 8 }}
                   />
                   <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>Details are required before saving this action.</div>
+                  {activeAction === "Note" && (
+                    <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                      <select value={actionAssignedTo} onChange={(e) => setActionAssignedTo(e.target.value)} style={{ ...S.fInput, width: 220 }}>
+                        <option value="">Assign to user</option>
+                        {assignableUsers.map((username) => (
+                          <option key={username} value={username}>{username}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   {formErrors.actionDescription && <div style={{ color: "#ef4444", fontSize: 11, marginBottom: 12 }}>{formErrors.actionDescription}</div>}
                   <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-                    <input type="date" min={new Date().toISOString().slice(0, 10)} value={actionFollowUpDate} onChange={(e) => setActionFollowUpDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
+                    <input type="date" min={new Date().toISOString().slice(0, 10)} value={actionFollowUpDate} onChange={(e) => setActionFollowUpDate(e.target.value)} style={{ ...S.fInput, width: 180 }} title="Business dates only: Monday to Friday" />
                     <input type="time" value={actionFollowUpTime} onChange={(e) => setActionFollowUpTime(e.target.value)} style={{ ...S.fInput, width: 140 }} />
                     <div style={{ alignSelf: "center", fontSize: 12, color: "#64748b" }}>Next follow-up for this action</div>
                   </div>
@@ -1514,6 +1556,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                             <span style={{ fontSize: 12, color: "#64748b" }}>{entry.date}{entry.time ? ` at ${entry.time}` : ""}</span>
                           </div>
                           {entry.createdBy && <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Created by: {entry.createdBy}</div>}
+                          {entry.assignedTo && <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Assigned to: {entry.assignedTo}</div>}
                           {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Place: {entry.place}</div>}
                           {(entry.followUpDate || entry.followUpTime) && (
                             <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>
@@ -1542,26 +1585,11 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Prospect Date","Client Name","Program Name","Project Name","Engagement Name","Engagement Type","Handled By",
-                  "Client SPOC","Client Designation","Client Email","Client Phone",
+                {(["Prospect Date","Client Name","Handled By","Assigned To","Client SPOC","Client Email","Client Phone",
                   "Partner SPOC","Partner Designation","Partner Email","Partner Phone",
-                  "Status","Remarks"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map((h) => (
+                  "Status","Last Action Comment","Remarks"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map((h) => (
                   <th key={h} style={h === "Actions" ? S.thSticky : h === "Client Name" ? S.thClientSticky : S.th}>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                      {h}
-                      {({
-                        "Program Name": "The overall program or initiative this engagement falls under",
-                        "Engagement Name": "Name of the specific engagement within the project",
-                        "Engagement Type": "e.g. Development, M&S, Consulting, Support, Implementation, TBD",
-
-                       
-                      } as Record<string,string>)[h] && <Tooltip text={({
-                        "Program Name": "The overall program or initiative this engagement falls under",
-                        "Engagement Name": "Name of the specific engagement within the project",
-                        "Engagement Type": "e.g. Development, M&S, Consulting, Support, Implementation, TBD",
-                        
-                      } as Record<string,string>)[h]} />}
-                    </span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{h}</span>
                   </th>
                 ))}
               </tr>
@@ -1579,7 +1607,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
                   {(() => {
-                    const linkedDetails = getLeadDisplayDetails(lead, linkedLeads[lead.leadId]);
+                    const latestAction = getLatestLeadAction((lead as any).actions || []);
+                    const latestAssignedAction = getLatestAssignedLeadAction((lead as any).actions || []);
                     return (
                       <>
                   {visibleCols["Prospect Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{lead.leadDate || "-"}</td>}
@@ -1594,13 +1623,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                       </button>
                     </td>
                   )}
-                  {visibleCols["Program Name"] && <td style={{ ...S.td, minWidth: 140 }}>{linkedDetails.programName || "-"}</td>}
-                  {visibleCols["Project Name"] && <td style={S.td}>{linkedDetails.projectName || "-"}</td>}
-                  {visibleCols["Engagement Name"] && <td style={{ ...S.td, minWidth: 160 }}>{linkedDetails.engagementName || "-"}</td>}
-                  {visibleCols["Engagement Type"] && <td style={S.td}>{linkedDetails.engagementType || "-"}</td>}
                   {visibleCols["Handled By"] && <td style={S.td}>{(lead as any).handledBy || "-"}</td>}
+                  {visibleCols["Assigned To"] && <td style={S.td}>{latestAssignedAction?.assignedTo || "-"}</td>}
                   {visibleCols["Client SPOC"] && <td style={S.td}>{lead.clientSpoc}</td>}
-                  {visibleCols["Client Designation"] && <td style={S.td}>{lead.clientSpocPosition}</td>}
                   {visibleCols["Client Email"] && <td style={{ ...S.td, color: "#2563eb" }}>
                     {lead.clientEmail ? <a href={`mailto:${lead.clientEmail}`} style={{ color: "#2563eb" }}>{lead.clientEmail}</a> : "-"}
                   </td>}
@@ -1616,6 +1641,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                       style={{ ...S.statusSelect, background: STATUS_COLORS[lead.status]?.bg, color: STATUS_COLORS[lead.status]?.color }}>
                       {STATUSES.map((s) => <option key={s}>{s}</option>)}
                     </select>
+                  </td>}
+                  {visibleCols["Last Action Comment"] && <td style={{ ...S.td, minWidth: 220, maxWidth: 280, whiteSpace: "pre-wrap", color: "#64748b", fontSize: 12 }}>
+                    {latestAction?.description ? getRemarksPreview(latestAction.description, 180) : <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No actions</span>}
                   </td>}
                   {visibleCols["Remarks"] && <td style={{ ...S.td, minWidth: 200, maxWidth: 240, color: "#64748b", fontSize: 12, whiteSpace: "pre-wrap" }}>
                     {lead.remarks ? (
@@ -1638,10 +1666,26 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
                   {/* Actions */}
                   <td style={S.tdSticky}>
-                    <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
-                      <button onClick={() => startEdit(lead)} style={S.editBtn}>Edit</button>
-                      <button onClick={() => onNavigate("transactions", lead.leadId)} style={S.txnBtn}>Lead</button>
-                      <button onClick={() => deleteLead(lead)} style={S.deleteBtn}>Delete</button>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <button onClick={() => startEdit(lead)} style={S.iconBtn} title="Edit prospect" aria-label="Edit prospect">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                        </svg>
+                      </button>
+                      <button onClick={() => onNavigate("transactions", lead.leadId)} style={S.iconBtnWarn} title="Open lead" aria-label="Open lead">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 7h18" />
+                          <path d="M6 3h12l3 4v14H3V7l3-4Z" />
+                        </svg>
+                      </button>
+                      <button onClick={() => deleteLead(lead)} style={S.iconBtnDanger} title="Delete prospect" aria-label="Delete prospect">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 6h18" />
+                          <path d="M8 6V4h8v2" />
+                          <path d="M19 6l-1 14H6L5 6" />
+                        </svg>
+                      </button>
                     </div>
                   </td>
                       </>
@@ -1669,8 +1713,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             </div>
 
             {[
-              { title: "Prospect Info", cols: ["Prospect Date", "Client Name", "Program Name", "Project Name", "Engagement Name", "Engagement Type", "Handled By", "Status", "Remarks"] },
-              { title: "Client SPOC", cols: ["Client SPOC", "Client Designation", "Client Email", "Client Phone"] },
+              { title: "Prospect Info", cols: ["Prospect Date", "Client Name", "Handled By", "Assigned To", "Status", "Last Action Comment", "Remarks"] },
+              { title: "Client SPOC", cols: ["Client SPOC", "Client Email", "Client Phone"] },
               { title: "Partner SPOC", cols: ["Partner SPOC", "Partner Designation", "Partner Email", "Partner Phone"] },
             ].map(({ title, cols }) => (
               <div key={title} style={{ marginBottom: 20 }}>
@@ -1960,6 +2004,42 @@ const S: Record<string, React.CSSProperties> = {
     color: "#94a3b8",
     fontSize: 14,
     background: "#fbfdff",
+  },
+  iconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    border: "1px solid #dbe4f0",
+    background: "#ffffff",
+    color: "#2563eb",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  },
+  iconBtnWarn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    border: "1px solid #fde68a",
+    background: "#fffbeb",
+    color: "#d97706",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  },
+  iconBtnDanger: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    border: "1px solid #fecaca",
+    background: "#fef2f2",
+    color: "#dc2626",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
   },
   timelineEntry: {
     position: "relative",

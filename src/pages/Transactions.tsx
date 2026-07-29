@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, Fragment } from "react";
 import { db } from "../firebase/config";
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from "firebase/firestore";
 import { logActivity } from "../firebase/activityLog";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase/config";
@@ -9,6 +9,7 @@ import DeleteModal from "../components/DeleteModal";
 import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
 import { canAccessLead, getAllowedLeadIds, getSessionUser, isRestrictedUser } from "../accessControl";
+import { getBusinessDayError, isBusinessDay } from "../utils/followUps";
 
 const STAGES = ["Initiation", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
 const LINKED_LEAD_COLLECTION = "prospectLinkedLeads";
@@ -45,6 +46,7 @@ type TimelineEntry = {
   followUpTime?: string;
   createdAt: string;
   createdBy?: string;
+  assignedTo?: string;
 };
 
 const createEmptyDealItem = (): DealItem => ({
@@ -81,6 +83,13 @@ const EMPTY_ACTIVITY = {
   wonDate: "",
   wonTime: "",
   actions: [] as TimelineEntry[],
+};
+
+const EMPTY_FORM_LEAD_DETAILS = {
+  programName: "",
+  projectName: "",
+  engagementName: "",
+  engagementType: "",
 };
 
 type Activity = typeof EMPTY_ACTIVITY & { id: string; createdAt?: string };
@@ -433,6 +442,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const [showForm, setShowForm]     = useState(false);
   const [actionActivityId, setActionActivityId] = useState<string | null>(null);
   const [formData, setFormData]     = useState({ ...EMPTY_ACTIVITY });
+  const [formLeadDetails, setFormLeadDetails] = useState({ ...EMPTY_FORM_LEAD_DETAILS });
   const [editingId, setEditingId]   = useState<string | null>(null);
   const [search, setSearch]         = useState("");
   const [stageFilter, setStageFilter] = useState("All");
@@ -447,6 +457,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     "End Date": true,
     "Stage": true,
     "Handled By": true,
+    "Assigned To": true,
     "Notes": true,
   });
 
@@ -465,8 +476,10 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const [actionDate, setActionDate] = useState(new Date().toISOString().slice(0, 10));
   const [actionFollowUpDate, setActionFollowUpDate] = useState("");
   const [actionFollowUpTime, setActionFollowUpTime] = useState("");
+  const [actionAssignedTo, setActionAssignedTo] = useState("");
   const [timelineFilter, setTimelineFilter] = useState<"all" | TimelineCategory>("all");
   const [linkedLeads, setLinkedLeads] = useState<Record<string, ProspectLinkedLead>>({});
+  const [assignableUsers, setAssignableUsers] = useState<string[]>([]);
   const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -484,7 +497,14 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       });
       setLinkedLeads(next);
     });
-    return () => { u1(); u2(); u3(); };
+    const u4 = onSnapshot(collection(db, "users"), (snap) => {
+      const nextUsers = snap.docs
+        .map((docSnap) => String((docSnap.data() as any).username || "").trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+      setAssignableUsers(nextUsers);
+    });
+    return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
   const visibleLeads = isRestrictedUser(user)
@@ -495,10 +515,23 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     : activities;
   const selectedLead = routeLeadId ? visibleLeads.find((lead) => lead.leadId === routeLeadId) || null : null;
   const selectedLeadDetails = getLeadDisplayDetails(selectedLead, selectedLead ? linkedLeads[selectedLead.leadId] : null);
+  const formSelectedLead = formData.leadId
+    ? visibleLeads.find((lead) => lead.leadId === formData.leadId) || null
+    : null;
+  const formSelectedLeadDetails = getLeadDisplayDetails(
+    formSelectedLead,
+    formSelectedLead ? linkedLeads[formSelectedLead.leadId] : null
+  );
   const isLeadWorkspace = !!routeLeadId;
   const scopedActivities = routeLeadId
     ? visibleActivities.filter((activity) => activity.leadId === routeLeadId)
     : visibleActivities;
+
+  const getEditableLeadDetails = (leadId: string) => {
+    const lead = visibleLeads.find((item) => item.leadId === leadId) || null;
+    if (!lead) return { ...EMPTY_FORM_LEAD_DETAILS };
+    return getLeadDisplayDetails(lead, linkedLeads[lead.leadId] || null);
+  };
 
   const buildEmptyActivity = () => ({
     ...EMPTY_ACTIVITY,
@@ -526,7 +559,17 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const handleLeadSelect = (leadId: string) => {
     const lead = visibleLeads.find(l => l.leadId === leadId);
     setFormData(f => ({ ...f, leadId, accountName: lead?.accountName || "" }));
+    setFormLeadDetails(getEditableLeadDetails(leadId));
   };
+
+  useEffect(() => {
+    if (!showForm) return;
+    if (!formData.leadId) {
+      setFormLeadDetails({ ...EMPTY_FORM_LEAD_DETAILS });
+      return;
+    }
+    setFormLeadDetails(getEditableLeadDetails(formData.leadId));
+  }, [formData.leadId, linkedLeads, showForm]);
 
   const buildActivityDraft = (activity: Activity) => ({
     ...EMPTY_ACTIVITY,
@@ -553,6 +596,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         followUpTime: entry.followUpTime || "",
         createdAt,
         createdBy: entry.createdBy || entry.actionBy || "",
+        assignedTo: entry.assignedTo || "",
       };
     });
 
@@ -573,7 +617,13 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     followUpTime: overrides.followUpTime || "",
     createdAt: overrides.createdAt || new Date().toISOString(),
     createdBy: overrides.createdBy || user.username,
+    assignedTo: overrides.assignedTo || "",
   });
+
+  const getLatestAssignedAction = (entries: any[] = []) =>
+    normalizeTimelineEntries(entries)
+      .filter((entry) => String(entry.assignedTo || "").trim())
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] || null;
 
   const getUtf8Size = (value: unknown) =>
     new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value)).length;
@@ -761,6 +811,28 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         setImportResult("Next follow-up date and time cannot be in the past.");
         return;
       }
+      if (!isBusinessDay(formData.followUpDate)) {
+        setImportResult(getBusinessDayError(formData.followUpDate));
+        return;
+      }
+    }
+    if (formData.leadId && formSelectedLead) {
+      const existingLinkedLead = linkedLeads[formData.leadId] as any;
+      const linkedLeadPayload = buildProspectLinkedLeadPayload(
+        {
+          leadId: formSelectedLead.leadId,
+          accountName: formSelectedLead.accountName,
+          programName: formLeadDetails.programName,
+          projectId: formLeadDetails.projectName,
+          engagementName: formLeadDetails.engagementName,
+          engagementType: formLeadDetails.engagementType,
+          createdAt: existingLinkedLead?.createdAt,
+        } as any,
+        existingLinkedLead?.prospectDocId || formSelectedLead.id
+      );
+      if (linkedLeadPayload) {
+        await setDoc(doc(db, LINKED_LEAD_COLLECTION, linkedLeadPayload.linkedLeadId), linkedLeadPayload, { merge: true });
+      }
     }
     const previousActivity = editingId ? (activities.find(activity => activity.id === editingId) || null) : null;
     if (editingId) {
@@ -864,6 +936,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     setActiveAction(null);           // Close any open action section
     setActionDescription("");
     setMeetingPlace("");
+    setFormLeadDetails({ ...EMPTY_FORM_LEAD_DETAILS });
     setActionFollowUpDate("");
     setActionFollowUpTime("");
     setTimelineFilter("all");
@@ -1033,6 +1106,10 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       setImportResult("Follow-up date and time cannot be in the past.");
       return;
     }
+    if (actionFollowUpDate && !isBusinessDay(actionFollowUpDate)) {
+      setImportResult(getBusinessDayError(actionFollowUpDate));
+      return;
+    }
     if (getUtf8Size(normalizedDescription) > MAX_ACTION_DESCRIPTION_BYTES) {
       setImportResult(`${activeAction} text is too large to save in one entry. Please split it into smaller notes or actions.`);
       return;
@@ -1048,6 +1125,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         date: activeAction === "Note" ? now.toISOString().slice(0, 10) : actionDate,
         time: activeAction === "Note" ? now.toTimeString().slice(0, 5) : actionTime,
         place: meetingPlace || "",
+        assignedTo: activeAction === "Note" ? actionAssignedTo : "",
         followUpDate: actionFollowUpDate,
         followUpTime: actionFollowUpTime,
       }
@@ -1071,6 +1149,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     setActiveAction(null);
     setActionDescription("");
     setMeetingPlace("");
+    setActionAssignedTo("");
     setActionFollowUpDate("");
     setActionFollowUpTime("");
   };
@@ -1091,6 +1170,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     const [rowActionDate, setRowActionDate] = useState(new Date().toISOString().slice(0, 10));
     const [rowActionFollowUpDate, setRowActionFollowUpDate] = useState("");
     const [rowActionFollowUpTime, setRowActionFollowUpTime] = useState("");
+    const [rowActionAssignedTo, setRowActionAssignedTo] = useState("");
     const [rowActionError, setRowActionError] = useState("");
     const [rowTimelineFilter, setRowTimelineFilter] = useState<"all" | TimelineCategory>("all");
     const [rowLostModal, setRowLostModal] = useState(false);
@@ -1106,6 +1186,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       setRowMeetingPlace("");
       setRowActionFollowUpDate("");
       setRowActionFollowUpTime("");
+      setRowActionAssignedTo("");
       setRowActionError("");
       setRowTimelineFilter("all");
     }, [activity]);
@@ -1170,6 +1251,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       setRowMeetingPlace("");
       setRowActionFollowUpDate("");
       setRowActionFollowUpTime("");
+      setRowActionAssignedTo("");
       setRowActionError("");
     };
 
@@ -1188,12 +1270,17 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         setRowActionError("Follow-up date and time cannot be in the past.");
         return;
       }
+      if (rowActionFollowUpDate && !isBusinessDay(rowActionFollowUpDate)) {
+        setRowActionError(getBusinessDayError(rowActionFollowUpDate));
+        return;
+      }
       const category = getActionCategory(rowActiveAction);
       const now = new Date();
       const newAction = createTimelineEntry(category, rowActiveAction, normalizedDescription, {
         date: rowActiveAction === "Note" ? now.toISOString().slice(0, 10) : rowActionDate,
         time: rowActiveAction === "Note" ? now.toTimeString().slice(0, 5) : rowActionTime,
         place: rowMeetingPlace || "",
+        assignedTo: rowActiveAction === "Note" ? rowActionAssignedTo : "",
         followUpDate: rowActionFollowUpDate,
         followUpTime: rowActionFollowUpTime,
       });
@@ -1207,6 +1294,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       setRowMeetingPlace("");
       setRowActionFollowUpDate("");
       setRowActionFollowUpTime("");
+      setRowActionAssignedTo("");
     };
 
     const saveRowLostReason = () => {
@@ -1453,8 +1541,16 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               <textarea value={rowActionDescription} onChange={e => setRowActionDescription(e.target.value)} onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, rowActionDescription, setRowActionDescription)} rows={4} style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }} placeholder="Add details here..." />
               {rowActionError && <div style={{ marginTop: 6, fontSize: 12, color: "#dc2626" }}>{rowActionError}</div>}
             </div>
+            {rowActiveAction === "Note" && (
+              <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                <select value={rowActionAssignedTo} onChange={e => setRowActionAssignedTo(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 220 }}>
+                  <option value="">Assign to user</option>
+                  {assignableUsers.map((username) => <option key={username} value={username}>{username}</option>)}
+                </select>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-              <input type="date" min={new Date().toISOString().slice(0, 10)} value={rowActionFollowUpDate} onChange={e => setRowActionFollowUpDate(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 170 }} />
+              <input type="date" min={new Date().toISOString().slice(0, 10)} value={rowActionFollowUpDate} onChange={e => setRowActionFollowUpDate(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 170 }} title="Business dates only: Monday to Friday" />
               <input type="time" value={rowActionFollowUpTime} onChange={e => setRowActionFollowUpTime(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 140 }} />
               <div style={{ alignSelf: "center", fontSize: 12, color: "#64748b" }}>Next follow-up for this action</div>
             </div>
@@ -1516,11 +1612,16 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                           </div>
                           <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: entry.description ? 4 : 0 }}>{entry.title}</div>
                                    {entry.place && <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>Place: {entry.place}</div>}
-                                   {(entry.followUpDate || entry.followUpTime) && (
-                                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>
-                                       Follow-up: {entry.followUpDate || "Date pending"}{entry.followUpTime ? ` at ${entry.followUpTime}` : ""}
-                                     </div>
-                                   )}
+                                    {entry.assignedTo && (
+                                      <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>
+                                        Assigned to: {entry.assignedTo}
+                                      </div>
+                                    )}
+                                    {(entry.followUpDate || entry.followUpTime) && (
+                                      <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>
+                                        Follow-up: {entry.followUpDate || "Date pending"}{entry.followUpTime ? ` at ${entry.followUpTime}` : ""}
+                                      </div>
+                                    )}
                                    {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{entry.description}</div>}
                         </div>
                         <button type="button" onClick={() => setRowActionDeleteModal({ index: originalIndex, action: entry })} style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer" }} aria-label={`Delete ${entry.title}`}>
@@ -2326,10 +2427,6 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
           <div style={S.leadInfoGrid}>
             {[
               ["Client Name", selectedLead.accountName],
-              ["Program Name", selectedLeadDetails.programName],
-              ["Project Name", selectedLeadDetails.projectName],
-              ["Engagement Name", selectedLeadDetails.engagementName],
-              ["Engagement Type", selectedLeadDetails.engagementType],
               ["Client SPOC", selectedLead.clientSpoc],
               ["Client Designation", selectedLead.clientSpocPosition],
               ["Client Email", selectedLead.clientEmail],
@@ -2428,6 +2525,38 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               <div style={S.formField}>
                 <label style={S.fLabel}>Account Name</label>
                 <input style={{ ...S.fInput, background: "#f1f5f9" }} value={formData.accountName} readOnly />
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Program Name</label>
+                <input
+                  style={S.fInput}
+                  value={formLeadDetails.programName}
+                  onChange={e => setFormLeadDetails(prev => ({ ...prev, programName: e.target.value }))}
+                />
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Project Name</label>
+                <input
+                  style={S.fInput}
+                  value={formLeadDetails.projectName}
+                  onChange={e => setFormLeadDetails(prev => ({ ...prev, projectName: e.target.value }))}
+                />
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Engagement Name</label>
+                <input
+                  style={S.fInput}
+                  value={formLeadDetails.engagementName}
+                  onChange={e => setFormLeadDetails(prev => ({ ...prev, engagementName: e.target.value }))}
+                />
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Engagement Type</label>
+                <input
+                  style={S.fInput}
+                  value={formLeadDetails.engagementType}
+                  onChange={e => setFormLeadDetails(prev => ({ ...prev, engagementType: e.target.value }))}
+                />
               </div>
               <div style={S.formField}>
                 <label style={S.fLabel}>Lead Name *</label>
@@ -2812,6 +2941,14 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                       placeholder="Add details here..." 
                     />
                   </div>
+                  {activeAction === "Note" && (
+                    <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                      <select value={actionAssignedTo} onChange={e => setActionAssignedTo(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 220 }}>
+                        <option value="">Assign to user</option>
+                        {assignableUsers.map((username) => <option key={username} value={username}>{username}</option>)}
+                      </select>
+                    </div>
+                  )}
                   <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
                     <input
                       type="date"
@@ -2819,6 +2956,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                       value={actionFollowUpDate}
                       onChange={e => setActionFollowUpDate(e.target.value)}
                       style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 180 }}
+                      title="Business dates only: Monday to Friday"
                     />
                     <input
                       type="time"
@@ -2943,6 +3081,11 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                                     Place: {entry.place}
                                   </div>
                                 )}
+                                {entry.assignedTo && (
+                                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>
+                                    Assigned to: {entry.assignedTo}
+                                  </div>
+                                )}
                                 {(entry.followUpDate || entry.followUpTime) && (
                                   <div style={{ fontSize: 12, color: "#64748b", marginBottom: entry.description ? 4 : 0, whiteSpace: "pre-wrap" }}>
                                     Follow-up: {entry.followUpDate || "Date pending"}{entry.followUpTime ? ` at ${entry.followUpTime}` : ""}
@@ -3010,7 +3153,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Account Name", "Lead Name", "Start Date", "End Date", "Stage", "Handled By", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
+                {(["Account Name", "Lead Name", "Start Date", "End Date", "Stage", "Handled By", "Assigned To", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
                   <th key={h} style={h === "Actions" ? S.thSticky : S.th}>{h}</th>
                 ))}
               </tr>
@@ -3036,6 +3179,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                       </span>
                     </td>}
                     {visibleCols["Handled By"] && <td style={S.td}>{a.handledBy || "-"}</td>}
+                    {visibleCols["Assigned To"] && <td style={S.td}>{getLatestAssignedAction(a.actions || [])?.assignedTo || "-"}</td>}
                     {visibleCols["Notes"] && <td style={{ ...S.td, minWidth: 200, maxWidth: 260, whiteSpace: "pre-wrap", color: "#64748b", fontSize: 12 }}>
                       {a.notes || <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No notes</span>}
                     </td>}
@@ -3066,7 +3210,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               <button onClick={() => setShowColModal(false)} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#64748b" }}>✕</button>
             </div>
             {[
-              { title: "Lead Info", cols: ["Client Name", "Lead Name", "Start Date", "End Date", "Stage", "Handled By", "Notes"] },
+              { title: "Lead Info", cols: ["Account Name", "Lead Name", "Start Date", "End Date", "Stage", "Handled By", "Assigned To", "Notes"] },
               { title: "Deal Info (shown when Deal Mode is ON)", cols: ["Deal Value", "Due Date", "Probability"] },
             ].map(({ title, cols }) => (
               <div key={title} style={{ marginBottom: 20 }}>

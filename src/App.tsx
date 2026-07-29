@@ -5,6 +5,7 @@ import Transactions from "./pages/Transactions";
 import ActivityDetail from "./pages/ActivityDetail";
 import Deals from "./pages/Deals";
 import ActivityLog from "./pages/ActivityLog";
+import FollowUps from "./pages/FollowUps";
 import Users from "./pages/Users";
 import { getPagePath, Page } from "./navigation";
 
@@ -36,6 +37,7 @@ function AppRoutes({ role }: { role: string }) {
       <Route path="/activities/:activityId" element={<ActivityDetailRoute onNavigate={handleNavigate} />} />
       <Route path="/leads/:leadId/activities" element={<LeadActivitiesRoute onNavigate={handleNavigate} />} />
       <Route path="/deals" element={<Deals onNavigate={handleNavigate} />} />
+      <Route path="/follow-ups" element={<FollowUps onNavigate={handleNavigate} />} />
       <Route path="/activity-log" element={adminOnly(<ActivityLog onNavigate={handleNavigate} />)} />
       <Route path="/users" element={adminOnly(<Users onNavigate={handleNavigate} />)} />
       <Route path="*" element={<Navigate to="/leads" replace />} />
