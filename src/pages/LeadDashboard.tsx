@@ -813,6 +813,14 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
         });
       }
       resetForm();
+      setImportResult(null);
+    } catch (error: any) {
+      console.error("save prospect error:", error);
+      setImportResult(
+        error?.message
+          ? `Failed to save prospect. ${error.message}`
+          : "Failed to save prospect. Please try again."
+      );
     } finally {
       setSavingLead(false);
     }
