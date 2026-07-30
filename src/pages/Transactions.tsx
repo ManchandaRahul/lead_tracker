@@ -2175,10 +2175,55 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     };
     const alwaysIncludedKeys = ["Program Name", "Project Name", "Actions"];
     const visibleKeys = Object.keys(allCols).filter((k) => alwaysIncludedKeys.includes(k) || visibleCols[k]);
-    const rows = filtered.map((a) =>
-      Object.fromEntries(visibleKeys.map(k => [k, allCols[k](a)]))
-    );
+    const exportActivities = [...filtered].sort((a, b) => {
+      const accountDiff = String(a.accountName || "").localeCompare(String(b.accountName || ""));
+      if (accountDiff !== 0) return accountDiff;
+      const startDateDiff = String(b.activityDate || "").localeCompare(String(a.activityDate || ""));
+      if (startDateDiff !== 0) return startDateDiff;
+      return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+    });
+    const accountNameColumnIndex = visibleKeys.indexOf("Account Name");
+    const merges: Array<{ s: { r: number; c: number }; e: { r: number; c: number } }> = [];
+    let currentAccount = "";
+    let currentStartIndex = -1;
+    let currentCount = 0;
+
+    const rows = exportActivities.map((a, index) => {
+      const accountName = String(a.accountName || "");
+      if (accountNameColumnIndex >= 0) {
+        if (accountName !== currentAccount) {
+          if (currentCount > 1) {
+            merges.push({
+              s: { r: currentStartIndex + 1, c: accountNameColumnIndex },
+              e: { r: currentStartIndex + currentCount, c: accountNameColumnIndex },
+            });
+          }
+          currentAccount = accountName;
+          currentStartIndex = index;
+          currentCount = 1;
+        } else {
+          currentCount += 1;
+        }
+      }
+
+      return Object.fromEntries(
+        visibleKeys.map((k) => [
+          k,
+          k === "Account Name" && accountNameColumnIndex >= 0 && index > currentStartIndex ? "" : allCols[k](a),
+        ])
+      );
+    });
+
+    if (accountNameColumnIndex >= 0 && currentCount > 1) {
+      merges.push({
+        s: { r: currentStartIndex + 1, c: accountNameColumnIndex },
+        e: { r: currentStartIndex + currentCount, c: accountNameColumnIndex },
+      });
+    }
     const ws = XLSX.utils.json_to_sheet(rows);
+    if (merges.length > 0) {
+      (ws as any)["!merges"] = merges;
+    }
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Leads");
     XLSX.writeFile(wb, `Leads_${new Date().toISOString().slice(0,10)}.xlsx`);
