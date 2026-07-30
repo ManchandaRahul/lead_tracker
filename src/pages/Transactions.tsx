@@ -2164,6 +2164,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     const allCols: Record<string, (a: Activity) => any> = {
       "Account Name":  (a) => a.accountName,
       "Lead Name": (a) => a.activityName,
+      "Program Name": (a) => getLeadDisplayDetails(leads.find((lead) => lead.leadId === a.leadId) || null, linkedLeads[a.leadId]).programName,
+      "Project Name": (a) => getLeadDisplayDetails(leads.find((lead) => lead.leadId === a.leadId) || null, linkedLeads[a.leadId]).projectName,
       "Start Date":    (a) => a.activityDate,
       "End Date":      (a) => (a as any).endDate || "",
       "Stage":         (a) => a.stage,
@@ -2171,7 +2173,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       "Notes":         (a) => normalizeActionTextRichV2(a.notes || ""),
       "Actions":       (a) => formatActionsForExport(a),
     };
-    const visibleKeys = Object.keys(allCols).filter((k) => k === "Actions" || visibleCols[k]);
+    const alwaysIncludedKeys = ["Program Name", "Project Name", "Actions"];
+    const visibleKeys = Object.keys(allCols).filter((k) => alwaysIncludedKeys.includes(k) || visibleCols[k]);
     const rows = filtered.map((a) =>
       Object.fromEntries(visibleKeys.map(k => [k, allCols[k](a)]))
     );
