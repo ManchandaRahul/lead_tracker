@@ -577,6 +577,13 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const formErrorSummary =
     Object.values(formErrors).find((value) => String(value || "").trim()) ||
     (importResult && !importResult.startsWith("✅") ? importResult : "");
+  const formErrorList = Array.from(
+    new Set(
+      Object.values(formErrors)
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  );
 
   const syncLinkedLeadRecord = async (lead: Partial<Lead>, prospectDocId: string, detailSource?: Partial<Lead>) => {
     const payload = buildProspectLinkedLeadPayload(lead, prospectDocId, detailSource);
@@ -1586,7 +1593,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
             <div style={{ padding: "0 24px 24px", display: "flex", gap: 10 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
-                {formErrorSummary && (
+                {(formErrorSummary || formErrorList.length > 0) && (
                   <div
                     style={{
                       padding: "10px 12px",
@@ -1598,7 +1605,16 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                       fontWeight: 600,
                     }}
                   >
-                    {formErrorSummary}
+                    <div>{formErrorSummary || "Please fix the following fields before saving."}</div>
+                    {formErrorList.length > 0 && (
+                      <ul style={{ margin: "8px 0 0 18px", padding: 0, fontWeight: 500 }}>
+                        {formErrorList.map((error) => (
+                          <li key={error} style={{ marginBottom: 4 }}>
+                            {error}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 )}
                 <div style={{ display: "flex", gap: 10 }}>
