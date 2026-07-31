@@ -451,8 +451,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const [deleteModal, setDeleteModal] = useState<{ activity: Activity } | null>(null);
   const [showColModal, setShowColModal] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
-    "Account Name": true,
-    "Lead Name": true,
+    "Client Name": true,
+    "Project Name": true,
     "Start Date": true,
     "End Date": true,
     "Stage": true,
@@ -2289,10 +2289,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
 
   const downloadExcel = () => {
     const allCols: Record<string, (a: Activity) => any> = {
-      "Account Name":  (a) => a.accountName,
-      "Lead Name": (a) => a.activityName,
-      "Program Name": (a) => getLeadDisplayDetails(leads.find((lead) => lead.leadId === a.leadId) || null, linkedLeads[a.leadId]).programName,
-      "Project Name": (a) => getLeadDisplayDetails(leads.find((lead) => lead.leadId === a.leadId) || null, linkedLeads[a.leadId]).projectName,
+      "Client Name":   (a) => a.accountName,
+      "Project Name":  (a) => a.activityName,
       "Start Date":    (a) => a.activityDate,
       "End Date":      (a) => (a as any).endDate || "",
       "Stage":         (a) => a.stage,
@@ -2301,7 +2299,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       "Notes":         (a) => normalizeActionTextRichV2(a.notes || ""),
       "Actions":       (a) => formatActionsForExport(a),
     };
-    const alwaysIncludedKeys = ["Program Name", "Project Name", "Actions"];
+    const alwaysIncludedKeys = ["Actions"];
     const visibleKeys = Object.keys(allCols).filter((k) => alwaysIncludedKeys.includes(k) || visibleCols[k]);
     const exportActivities = [...filtered].sort((a, b) => {
       const accountDiff = String(a.accountName || "").localeCompare(String(b.accountName || ""));
@@ -2310,7 +2308,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       if (startDateDiff !== 0) return startDateDiff;
       return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
     });
-    const accountNameColumnIndex = visibleKeys.indexOf("Account Name");
+    const accountNameColumnIndex = visibleKeys.indexOf("Client Name");
     const merges: Array<{ s: { r: number; c: number }; e: { r: number; c: number } }> = [];
     let currentAccount = "";
     let currentStartIndex = -1;
@@ -2337,7 +2335,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       return Object.fromEntries(
         visibleKeys.map((k) => [
           k,
-          k === "Account Name" && accountNameColumnIndex >= 0 && index > currentStartIndex ? "" : allCols[k](a),
+          k === "Client Name" && accountNameColumnIndex >= 0 && index > currentStartIndex ? "" : allCols[k](a),
         ])
       );
     });
@@ -2699,43 +2697,11 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                 )}
               </div>
               <div style={S.formField}>
-                <label style={S.fLabel}>Account Name</label>
+                <label style={S.fLabel}>Client Name</label>
                 <input style={{ ...S.fInput, background: "#f1f5f9" }} value={formData.accountName} readOnly />
               </div>
               <div style={S.formField}>
-                <label style={S.fLabel}>Program Name</label>
-                <input
-                  style={S.fInput}
-                  value={formLeadDetails.programName}
-                  onChange={e => setFormLeadDetails(prev => ({ ...prev, programName: e.target.value }))}
-                />
-              </div>
-              <div style={S.formField}>
-                <label style={S.fLabel}>Project Name</label>
-                <input
-                  style={S.fInput}
-                  value={formLeadDetails.projectName}
-                  onChange={e => setFormLeadDetails(prev => ({ ...prev, projectName: e.target.value }))}
-                />
-              </div>
-              <div style={S.formField}>
-                <label style={S.fLabel}>Engagement Name</label>
-                <input
-                  style={S.fInput}
-                  value={formLeadDetails.engagementName}
-                  onChange={e => setFormLeadDetails(prev => ({ ...prev, engagementName: e.target.value }))}
-                />
-              </div>
-              <div style={S.formField}>
-                <label style={S.fLabel}>Engagement Type</label>
-                <input
-                  style={S.fInput}
-                  value={formLeadDetails.engagementType}
-                  onChange={e => setFormLeadDetails(prev => ({ ...prev, engagementType: e.target.value }))}
-                />
-              </div>
-              <div style={S.formField}>
-                <label style={S.fLabel}>Lead Name *</label>
+                <label style={S.fLabel}>Project Name *</label>
                 <input style={S.fInput} required placeholder="e.g. Discovery Call, Proposal Sent…" value={formData.activityName} onChange={e => setFormData({ ...formData, activityName: e.target.value })} />
               </div>
               <div style={S.formField}>
@@ -2753,8 +2719,24 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                 </select>
               </div>
               <div style={S.formField}>
-                <label style={S.fLabel}>Handled By *</label>
+                <label style={S.fLabel}>Initiated By *</label>
                 <input style={S.fInput} value={formData.handledBy} onChange={e => setFormData({ ...formData, handledBy: e.target.value })} />
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Engagement Type</label>
+                <input
+                  style={S.fInput}
+                  value={formLeadDetails.engagementType}
+                  onChange={e => setFormLeadDetails(prev => ({ ...prev, engagementType: e.target.value }))}
+                />
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Managed By</label>
+                <input
+                  style={{ ...S.fInput, background: "#f1f5f9" }}
+                  value={getLatestAssignedAction(formData.actions || [])?.assignedTo || ""}
+                  readOnly
+                />
               </div>
               {formData.stage === "On Hold" && (
                 <>
@@ -3350,7 +3332,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Account Name", "Lead Name", "Start Date", "End Date", "Stage", "Initiated By", "Managed By", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
+                {(["Client Name", "Project Name", "Start Date", "End Date", "Stage", "Initiated By", "Managed By", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
                   <th key={h} style={h === "Actions" ? S.thSticky : S.th}>{h}</th>
                 ))}
               </tr>
@@ -3366,8 +3348,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                   <tr style={S.tr}
                     onMouseEnter={e => (e.currentTarget.style.background = "#f8fafc")}
                     onMouseLeave={e => (e.currentTarget.style.background = "")}>
-                    {visibleCols["Account Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 140 }}>{a.accountName}</td>}
-                    {visibleCols["Lead Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 160 }}>{a.activityName}</td>}
+                    {visibleCols["Client Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 140 }}>{a.accountName}</td>}
+                    {visibleCols["Project Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 160 }}>{a.activityName}</td>}
                     {visibleCols["Start Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{a.activityDate || "-"}</td>}
                     {visibleCols["End Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{(a as any).endDate || "-"}</td>}
                     {visibleCols["Stage"] && <td style={S.td}>
@@ -3407,7 +3389,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               <button onClick={() => setShowColModal(false)} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#64748b" }}>✕</button>
             </div>
             {[
-              { title: "Lead Info", cols: ["Account Name", "Lead Name", "Start Date", "End Date", "Stage", "Initiated By", "Managed By", "Notes"] },
+              { title: "Lead Info", cols: ["Client Name", "Project Name", "Start Date", "End Date", "Stage", "Initiated By", "Managed By", "Notes"] },
               { title: "Deal Info (shown when Deal Mode is ON)", cols: ["Deal Value", "Due Date", "Probability"] },
             ].map(({ title, cols }) => (
               <div key={title} style={{ marginBottom: 20 }}>
