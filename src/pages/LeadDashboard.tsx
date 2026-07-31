@@ -567,7 +567,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const [assignableUsers, setAssignableUsers] = useState<string[]>([]);
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
     // Prospect Info
-    "Prospect Date": true, "Client Name": true, "Handled By": true, "Assigned To": true, "Status": true, "Last Action Comment": true, "Remarks": true,
+    "Prospect Date": true, "Client Name": true, "Initiated By": true, "Managed By": true, "Status": true, "Last Action Comment": true, "Remarks": true,
     // Client SPOC
     "Client SPOC": true, "Client Email": true, "Client Phone": true,
     // Partner SPOC
@@ -928,7 +928,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       "Project Name":       (l) => getLeadDisplayDetails(l, linkedLeads[l.leadId]).projectName,
       "Engagement Name":    (l) => getLeadDisplayDetails(l, linkedLeads[l.leadId]).engagementName,
       "Engagement Type":    (l) => getLeadDisplayDetails(l, linkedLeads[l.leadId]).engagementType,
-      "Handled By":         (l) => (l as any).handledBy || "",
+      "Initiated By":       (l) => (l as any).handledBy || "",
       "URL":                (l) => (l as any).url || "",
       "Client SPOC":        (l) => l.clientSpoc,
       "Client Designation": (l) => l.clientSpocPosition,
@@ -1698,7 +1698,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Prospect Date","Client Name","Handled By","Assigned To","Client SPOC","Client Email","Client Phone",
+                {(["Prospect Date","Client Name","Initiated By","Managed By","Client SPOC","Client Email","Client Phone",
                   "Partner SPOC","Partner Designation","Partner Email","Partner Phone",
                   "Status","Last Action Comment","Remarks"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map((h) => (
                   <th key={h} style={h === "Actions" ? S.thSticky : h === "Client Name" ? S.thClientSticky : S.th}>
@@ -1736,8 +1736,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                       </button>
                     </td>
                   )}
-                  {visibleCols["Handled By"] && <td style={S.td}>{(lead as any).handledBy || "-"}</td>}
-                  {visibleCols["Assigned To"] && <td style={S.td}>{latestAssignedAction?.assignedTo || "-"}</td>}
+                  {visibleCols["Initiated By"] && <td style={S.td}>{(lead as any).handledBy || "-"}</td>}
+                  {visibleCols["Managed By"] && <td style={S.td}>{latestAssignedAction?.assignedTo || "-"}</td>}
                   {visibleCols["Client SPOC"] && <td style={S.td}>{lead.clientSpoc}</td>}
                   {visibleCols["Client Email"] && <td style={{ ...S.td, color: "#2563eb" }}>
                     {lead.clientEmail ? <a href={`mailto:${lead.clientEmail}`} style={{ color: "#2563eb" }}>{lead.clientEmail}</a> : "-"}
@@ -1826,7 +1826,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             </div>
 
             {[
-              { title: "Prospect Info", cols: ["Prospect Date", "Client Name", "Handled By", "Assigned To", "Status", "Last Action Comment", "Remarks"] },
+              { title: "Prospect Info", cols: ["Prospect Date", "Client Name", "Initiated By", "Managed By", "Status", "Last Action Comment", "Remarks"] },
               { title: "Client SPOC", cols: ["Client SPOC", "Client Email", "Client Phone"] },
               { title: "Partner SPOC", cols: ["Partner SPOC", "Partner Designation", "Partner Email", "Partner Phone"] },
             ].map(({ title, cols }) => (

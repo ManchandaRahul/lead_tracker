@@ -456,8 +456,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     "Start Date": true,
     "End Date": true,
     "Stage": true,
-    "Handled By": true,
-    "Assigned To": true,
+    "Initiated By": true,
+    "Managed By": true,
     "Notes": true,
   });
 
@@ -2296,7 +2296,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       "Start Date":    (a) => a.activityDate,
       "End Date":      (a) => (a as any).endDate || "",
       "Stage":         (a) => a.stage,
-      "Handled By":    (a) => a.handledBy,
+      "Initiated By":  (a) => a.handledBy,
+      "Managed By":    (a) => getLatestAssignedAction(a.actions || [])?.assignedTo || "",
       "Notes":         (a) => normalizeActionTextRichV2(a.notes || ""),
       "Actions":       (a) => formatActionsForExport(a),
     };
@@ -3349,7 +3350,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Account Name", "Lead Name", "Start Date", "End Date", "Stage", "Handled By", "Assigned To", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
+                {(["Account Name", "Lead Name", "Start Date", "End Date", "Stage", "Initiated By", "Managed By", "Notes"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map(h => (
                   <th key={h} style={h === "Actions" ? S.thSticky : S.th}>{h}</th>
                 ))}
               </tr>
@@ -3374,8 +3375,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                         {a.stage}
                       </span>
                     </td>}
-                    {visibleCols["Handled By"] && <td style={S.td}>{a.handledBy || "-"}</td>}
-                    {visibleCols["Assigned To"] && <td style={S.td}>{getLatestAssignedAction(a.actions || [])?.assignedTo || "-"}</td>}
+                    {visibleCols["Initiated By"] && <td style={S.td}>{a.handledBy || "-"}</td>}
+                    {visibleCols["Managed By"] && <td style={S.td}>{getLatestAssignedAction(a.actions || [])?.assignedTo || "-"}</td>}
                     {visibleCols["Notes"] && <td style={{ ...S.td, minWidth: 200, maxWidth: 260, whiteSpace: "pre-wrap", color: "#64748b", fontSize: 12 }}>
                       {a.notes || <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No notes</span>}
                     </td>}
@@ -3406,7 +3407,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               <button onClick={() => setShowColModal(false)} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#64748b" }}>✕</button>
             </div>
             {[
-              { title: "Lead Info", cols: ["Account Name", "Lead Name", "Start Date", "End Date", "Stage", "Handled By", "Assigned To", "Notes"] },
+              { title: "Lead Info", cols: ["Account Name", "Lead Name", "Start Date", "End Date", "Stage", "Initiated By", "Managed By", "Notes"] },
               { title: "Deal Info (shown when Deal Mode is ON)", cols: ["Deal Value", "Due Date", "Probability"] },
             ].map(({ title, cols }) => (
               <div key={title} style={{ marginBottom: 20 }}>
