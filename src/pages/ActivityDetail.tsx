@@ -456,6 +456,9 @@ export default function ActivityDetail({
   const [actionDeleteModal, setActionDeleteModal] = useState<{ index: number; action: TimelineEntry } | null>(null);
   const [deletedActionLogs, setDeletedActionLogs] = useState<{ action: any; reason: string; deletedAt: string }[]>([]);
   const [activeAction, setActiveAction] = useState<"Note" | "Call" | "Meeting" | null>(null);
+  const [manualActionTimestampMode, setManualActionTimestampMode] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteDescription, setEditingNoteDescription] = useState("");
   const [showDealEditor, setShowDealEditor] = useState(false);
   const [actionTime, setActionTime] = useState("11:31");
   const [meetingMode, setMeetingMode] = useState<"offline" | "online">("offline");
@@ -469,6 +472,18 @@ export default function ActivityDetail({
   const [timelineFilter, setTimelineFilter] = useState<"all" | TimelineCategory>("all");
   const [dealTimelineFilter, setDealTimelineFilter] = useState<DealTimelineFilter>("all");
   const [assignableUsers, setAssignableUsers] = useState<string[]>([]);
+
+  useEffect(() => {
+    const handleHiddenTimestampShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        setManualActionTimestampMode((prev) => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", handleHiddenTimestampShortcut);
+    return () => window.removeEventListener("keydown", handleHiddenTimestampShortcut);
+  }, []);
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, "transactions"), (snap) => {
@@ -854,9 +869,10 @@ export default function ActivityDetail({
           : meetingPlace.trim()
         : "";
     const now = new Date();
+    const noteUsesManualTimestamp = activeAction === "Note" && manualActionTimestampMode;
     const newAction = createTimelineEntry(user.username, category, activeAction, normalizedDescription, {
-      date: activeAction === "Note" ? now.toISOString().slice(0, 10) : actionDate,
-      time: activeAction === "Note" ? now.toTimeString().slice(0, 5) : actionTime,
+      date: noteUsesManualTimestamp ? actionDate : activeAction === "Note" ? now.toISOString().slice(0, 10) : actionDate,
+      time: noteUsesManualTimestamp ? actionTime : activeAction === "Note" ? now.toTimeString().slice(0, 5) : actionTime,
       place: meetingContext,
       followUpDate: actionFollowUpDate,
       followUpTime: actionFollowUpTime,
@@ -892,6 +908,54 @@ export default function ActivityDetail({
     setMeetingUrl("");
     setActionFollowUpDate("");
     setActionFollowUpTime("");
+  };
+
+  const startEditingNote = (entry: TimelineEntry) => {
+    setEditingNoteId(entry.id);
+    setEditingNoteDescription(entry.description || "");
+    setSaveFeedback(null);
+  };
+
+  const cancelEditingNote = () => {
+    setEditingNoteId(null);
+    setEditingNoteDescription("");
+  };
+
+  const saveEditedNote = async (entryId: string) => {
+    const normalizedDescription = normalizeActionTextRichV2(editingNoteDescription || "");
+    if (!normalizedDescription.trim()) {
+      setSaveFeedback({ type: "error", message: "Please enter note details before saving." });
+      return;
+    }
+    if (getUtf8Size(normalizedDescription) > MAX_ACTION_DESCRIPTION_BYTES) {
+      setSaveFeedback({
+        type: "error",
+        message: "Note text is too large to save in one entry. Please split it into smaller notes.",
+      });
+      return;
+    }
+    const nextActions = normalizeTimelineEntries(draft.actions || []).map((entry) =>
+      entry.id === entryId ? { ...entry, description: normalizedDescription } : entry
+    );
+    const nextDraft = { ...draft, actions: nextActions };
+    if (getUtf8Size(nextDraft) > MAX_TRANSACTION_DOCUMENT_BYTES) {
+      setSaveFeedback({
+        type: "error",
+        message: "This lead is too large to save as one record. Please shorten the note or split it into multiple smaller entries.",
+      });
+      return;
+    }
+    try {
+      await persistActivity(nextDraft);
+      setEditingNoteId(null);
+      setEditingNoteDescription("");
+      setSaveFeedback({ type: "success", message: "Note updated successfully." });
+    } catch (error: any) {
+      setSaveFeedback({
+        type: "error",
+        message: error?.message || "Failed to update note. Please try again.",
+      });
+    }
   };
 
   const saveDeal = async () => {
@@ -1394,7 +1458,7 @@ export default function ActivityDetail({
           {activeAction && (
             <div style={S.inlineActionCard}>
               <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
-              {activeAction !== "Note" && (
+              {(activeAction !== "Note" || manualActionTimestampMode) && (
                 <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
                   <input type="date" value={actionDate} onChange={(e) => setActionDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
                   <input type="time" value={actionTime} onChange={(e) => setActionTime(e.target.value)} style={{ ...S.fInput, width: 140 }} />
@@ -1573,9 +1637,30 @@ export default function ActivityDetail({
                                 Follow-up: {entry.followUpDate ? formatDisplayDate(entry.followUpDate) : "Date pending"}{entry.followUpTime ? ` at ${entry.followUpTime}` : ""}
                               </div>
                             )}
-                            {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, overflowWrap: "anywhere", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>{entry.description}</div>}
+                            {editingNoteId === entry.id ? (
+                              <div style={{ display: "grid", gap: 10 }}>
+                                <textarea
+                                  rows={4}
+                                  value={editingNoteDescription}
+                                  onChange={(e) => setEditingNoteDescription(e.target.value)}
+                                  onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, editingNoteDescription, setEditingNoteDescription)}
+                                  style={{ ...S.fInput, resize: "vertical" }}
+                                />
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                  <button type="button" onClick={() => saveEditedNote(entry.id)} style={S.btnPrimary}>Save Note</button>
+                                  <button type="button" onClick={cancelEditingNote} style={S.btnOutline}>Cancel</button>
+                                </div>
+                              </div>
+                            ) : (
+                              entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, overflowWrap: "anywhere", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>{entry.description}</div>
+                            )}
                         </div>
-                        <button type="button" onClick={() => setActionDeleteModal({ index: originalIndex, action: entry })} style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start" }}>×</button>
+                        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexShrink: 0 }}>
+                          {entry.category === "note" && editingNoteId !== entry.id && (
+                            <button type="button" onClick={() => startEditingNote(entry)} style={{ border: "none", background: "transparent", color: "#64748b", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "2px 0" }}>Edit</button>
+                          )}
+                          <button type="button" onClick={() => setActionDeleteModal({ index: originalIndex, action: entry })} style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start" }}>×</button>
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -554,6 +554,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const [handledByFilter, setHandledByFilter] = useState("All");
   const [expandedRemarks, setExpandedRemarks] = useState<Record<string, boolean>>({});
   const [activeAction, setActiveAction] = useState<"Note" | "Call" | "Meeting" | null>(null);
+  const [manualActionTimestampMode, setManualActionTimestampMode] = useState(false);
+  const [editingProspectNoteId, setEditingProspectNoteId] = useState<string | null>(null);
+  const [editingProspectNoteDescription, setEditingProspectNoteDescription] = useState("");
   const [actionDate, setActionDate] = useState(new Date().toISOString().slice(0, 10));
   const [actionTime, setActionTime] = useState(new Date().toTimeString().slice(0, 5));
   const [actionDescription, setActionDescription] = useState("");
@@ -573,6 +576,18 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const handleHiddenTimestampShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        setManualActionTimestampMode((prev) => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", handleHiddenTimestampShortcut);
+    return () => window.removeEventListener("keydown", handleHiddenTimestampShortcut);
+  }, []);
   const importRef = useRef<HTMLInputElement>(null);
   const formErrorSummary =
     Object.values(formErrors).find((value) => String(value || "").trim()) ||
@@ -1126,8 +1141,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     }
     const category = activeAction.toLowerCase() as TimelineCategory;
     const now = new Date();
-    const entryDate = activeAction === "Note" ? now.toISOString().slice(0, 10) : actionDate;
-    const entryTime = activeAction === "Note" ? now.toTimeString().slice(0, 5) : actionTime;
+    const noteUsesManualTimestamp = activeAction === "Note" && manualActionTimestampMode;
+    const entryDate = noteUsesManualTimestamp ? actionDate : activeAction === "Note" ? now.toISOString().slice(0, 10) : actionDate;
+    const entryTime = noteUsesManualTimestamp ? actionTime : activeAction === "Note" ? now.toTimeString().slice(0, 5) : actionTime;
     const newEntry = createLeadTimelineEntry(user.username, category, activeAction, normalizedDescription, {
       date: entryDate,
       time: entryTime,
@@ -1152,6 +1168,34 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     setActionAssignedTo("");
     setActionFollowUpDate("");
     setActionFollowUpTime("");
+  };
+
+  const startEditingProspectNote = (entry: LeadTimelineEntry) => {
+    setEditingProspectNoteId(entry.id);
+    setEditingProspectNoteDescription(entry.description || "");
+    setFormErrors((prev) => ({ ...prev, actionDescription: "" }));
+  };
+
+  const cancelEditingProspectNote = () => {
+    setEditingProspectNoteId(null);
+    setEditingProspectNoteDescription("");
+  };
+
+  const saveEditedProspectNote = (entryId: string) => {
+    const normalizedDescription = normalizeActionTextRichV2(editingProspectNoteDescription || "");
+    if (!normalizedDescription.trim()) {
+      setFormErrors((prev) => ({ ...prev, actionDescription: "Please enter note details before saving." }));
+      return;
+    }
+    setFormData((prev) => ({
+      ...prev,
+      actions: normalizeLeadTimelineEntries((prev as any).actions || []).map((entry) =>
+        entry.id === entryId ? { ...entry, description: normalizedDescription } : entry
+      ),
+    }));
+    setEditingProspectNoteId(null);
+    setEditingProspectNoteDescription("");
+    setFormErrors((prev) => ({ ...prev, actionDescription: "" }));
   };
 
   const logout = () => {
@@ -1509,7 +1553,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
               {activeAction && (
                 <div style={S.inlineActionCard}>
                   <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
-                  {activeAction !== "Note" && (
+                  {(activeAction !== "Note" || manualActionTimestampMode) && (
                     <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
                       <input type="date" value={actionDate} onChange={(e) => setActionDate(e.target.value)} style={{ ...S.fInput, width: 180 }} />
                       <input type="time" value={actionTime} onChange={(e) => setActionTime(e.target.value)} style={{ ...S.fInput, width: 140 }} />
@@ -1583,7 +1627,28 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                               Follow-up: {entry.followUpDate || "Date pending"}{entry.followUpTime ? ` at ${entry.followUpTime}` : ""}
                             </div>
                           )}
-                          <div style={{ fontSize: 13, color: "#334155", whiteSpace: "pre-wrap" }}>{entry.description}</div>
+                          {editingProspectNoteId === entry.id ? (
+                            <div style={{ display: "grid", gap: 10 }}>
+                              <textarea
+                                rows={4}
+                                value={editingProspectNoteDescription}
+                                onChange={(e) => setEditingProspectNoteDescription(e.target.value)}
+                                onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, editingProspectNoteDescription, setEditingProspectNoteDescription)}
+                                style={{ ...S.fInput, resize: "vertical" }}
+                              />
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button type="button" onClick={() => saveEditedProspectNote(entry.id)} style={S.btnPrimary}>Save Note</button>
+                                <button type="button" onClick={cancelEditingProspectNote} style={S.btnOutline}>Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 13, color: "#334155", whiteSpace: "pre-wrap" }}>{entry.description}</div>
+                          )}
+                          {entry.category === "note" && editingProspectNoteId !== entry.id && (
+                            <div style={{ marginTop: 8 }}>
+                              <button type="button" onClick={() => startEditingProspectNote(entry)} style={{ border: "none", background: "transparent", color: "#64748b", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Edit</button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}

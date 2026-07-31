@@ -470,6 +470,9 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
 
   // Inline Action States
   const [activeAction, setActiveAction] = useState<"Note" | "Call" | "Meeting" | null>(null);
+  const [manualActionTimestampMode, setManualActionTimestampMode] = useState(false);
+  const [editingTimelineNoteId, setEditingTimelineNoteId] = useState<string | null>(null);
+  const [editingTimelineNoteDescription, setEditingTimelineNoteDescription] = useState("");
   const [actionTime, setActionTime] = useState("11:31");
   const [meetingPlace, setMeetingPlace] = useState("");
   const [actionDescription, setActionDescription] = useState("");
@@ -481,6 +484,18 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const [linkedLeads, setLinkedLeads] = useState<Record<string, ProspectLinkedLead>>({});
   const [assignableUsers, setAssignableUsers] = useState<string[]>([]);
   const importRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleHiddenTimestampShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        setManualActionTimestampMode((prev) => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", handleHiddenTimestampShortcut);
+    return () => window.removeEventListener("keydown", handleHiddenTimestampShortcut);
+  }, []);
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, "transactions"), (snap) => {
@@ -987,6 +1002,45 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     setActionFollowUpTime("");
   };
 
+  const startEditingTimelineNote = (entry: TimelineEntry) => {
+    setEditingTimelineNoteId(entry.id);
+    setEditingTimelineNoteDescription(entry.description || "");
+    setImportResult(null);
+  };
+
+  const cancelEditingTimelineNote = () => {
+    setEditingTimelineNoteId(null);
+    setEditingTimelineNoteDescription("");
+  };
+
+  const saveEditedTimelineNote = async (entryId: string) => {
+    if (!actionActivityId) return;
+    const normalizedDescription = normalizeActionTextRichV2(editingTimelineNoteDescription || "");
+    if (!normalizedDescription.trim()) {
+      setImportResult("Please enter note details before saving.");
+      return;
+    }
+    if (getUtf8Size(normalizedDescription) > MAX_ACTION_DESCRIPTION_BYTES) {
+      setImportResult("Note text is too large to save in one entry. Please split it into smaller notes.");
+      return;
+    }
+    const nextActions = normalizeTimelineEntries(formData.actions || []).map((entry) =>
+      entry.id === entryId ? { ...entry, description: normalizedDescription } : entry
+    );
+    const nextDraft = { ...formData, actions: nextActions };
+    if (getUtf8Size(nextDraft) > MAX_TRANSACTION_DOCUMENT_BYTES) {
+      setImportResult("This activity is too large to save as one record. Please shorten the note or split it into multiple smaller entries.");
+      return;
+    }
+    const previousActivity = activities.find(activity => activity.id === actionActivityId) || null;
+    const payload = await persistExistingActivity(actionActivityId, nextDraft, previousActivity, deletedActionLogs);
+    setFormData(prev => ({ ...prev, ...payload, actions: normalizeTimelineEntries(payload.actions || []) }));
+    setDeletedActionLogs([]);
+    setEditingTimelineNoteId(null);
+    setEditingTimelineNoteDescription("");
+    setImportResult("Note updated successfully.");
+  };
+
   const confirmDeleteAction = (reason: string) => {
     if (!actionDeleteModal) return;
     const updated = [...(formData.actions || [])];
@@ -1117,13 +1171,14 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
 
     const category = getActionCategory(activeAction);
     const now = new Date();
+    const noteUsesManualTimestamp = activeAction === "Note" && manualActionTimestampMode;
     const newAction = createTimelineEntry(
       category,
       activeAction,
       normalizedDescription,
       {
-        date: activeAction === "Note" ? now.toISOString().slice(0, 10) : actionDate,
-        time: activeAction === "Note" ? now.toTimeString().slice(0, 5) : actionTime,
+        date: noteUsesManualTimestamp ? actionDate : activeAction === "Note" ? now.toISOString().slice(0, 10) : actionDate,
+        time: noteUsesManualTimestamp ? actionTime : activeAction === "Note" ? now.toTimeString().slice(0, 5) : actionTime,
         place: meetingPlace || "",
         assignedTo: activeAction === "Note" ? actionAssignedTo : "",
         followUpDate: actionFollowUpDate,
@@ -1177,6 +1232,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     const [rowLostReason, setRowLostReason] = useState("");
     const [rowActionDeleteModal, setRowActionDeleteModal] = useState<{ index: number; action: TimelineEntry } | null>(null);
     const [rowDeletedActionLogs, setRowDeletedActionLogs] = useState<{ action: any; reason: string; deletedAt: string }[]>([]);
+    const [rowEditingNoteId, setRowEditingNoteId] = useState<string | null>(null);
+    const [rowEditingNoteDescription, setRowEditingNoteDescription] = useState("");
 
     useEffect(() => {
       setDraft(buildActivityDraft(activity));
@@ -1189,6 +1246,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       setRowActionAssignedTo("");
       setRowActionError("");
       setRowTimelineFilter("all");
+      setRowEditingNoteId(null);
+      setRowEditingNoteDescription("");
     }, [activity]);
 
     const rowMonthlyAmount = parseFloat(draft.dealValue || "0") || 0;
@@ -1276,9 +1335,10 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       }
       const category = getActionCategory(rowActiveAction);
       const now = new Date();
+      const noteUsesManualTimestamp = rowActiveAction === "Note" && manualActionTimestampMode;
       const newAction = createTimelineEntry(category, rowActiveAction, normalizedDescription, {
-        date: rowActiveAction === "Note" ? now.toISOString().slice(0, 10) : rowActionDate,
-        time: rowActiveAction === "Note" ? now.toTimeString().slice(0, 5) : rowActionTime,
+        date: noteUsesManualTimestamp ? rowActionDate : rowActiveAction === "Note" ? now.toISOString().slice(0, 10) : rowActionDate,
+        time: noteUsesManualTimestamp ? rowActionTime : rowActiveAction === "Note" ? now.toTimeString().slice(0, 5) : rowActionTime,
         place: rowMeetingPlace || "",
         assignedTo: rowActiveAction === "Note" ? rowActionAssignedTo : "",
         followUpDate: rowActionFollowUpDate,
@@ -1332,6 +1392,44 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       setRowActiveAction(null);
       setRowActionDescription("");
       setRowMeetingPlace("");
+    };
+
+    const startEditingRowNote = (entry: TimelineEntry) => {
+      setRowEditingNoteId(entry.id);
+      setRowEditingNoteDescription(entry.description || "");
+      setRowActionError("");
+    };
+
+    const cancelEditingRowNote = () => {
+      setRowEditingNoteId(null);
+      setRowEditingNoteDescription("");
+    };
+
+    const saveEditedRowNote = async (entryId: string) => {
+      const normalizedDescription = normalizeActionTextRichV2(rowEditingNoteDescription || "");
+      if (!normalizedDescription.trim()) {
+        setRowActionError("Please enter note details before saving.");
+        return;
+      }
+      if (getUtf8Size(normalizedDescription) > MAX_ACTION_DESCRIPTION_BYTES) {
+        setRowActionError("Note text is too large to save in one entry. Please split it into smaller notes.");
+        return;
+      }
+      const nextActions = normalizeTimelineEntries(draft.actions || []).map((entry) =>
+        entry.id === entryId ? { ...entry, description: normalizedDescription } : entry
+      );
+      const nextDraft = { ...draft, actions: nextActions };
+      if (getUtf8Size(nextDraft) > MAX_TRANSACTION_DOCUMENT_BYTES) {
+        setRowActionError("This activity is too large to save as one record. Please shorten the note or split it into multiple smaller entries.");
+        return;
+      }
+      const previousActivity = activities.find(item => item.id === activity.id) || null;
+      const payload = await persistExistingActivity(activity.id, nextDraft, previousActivity, rowDeletedActionLogs);
+      setDraft(buildActivityDraft({ ...(previousActivity || activity), ...payload, id: activity.id } as Activity));
+      setRowDeletedActionLogs([]);
+      setRowEditingNoteId(null);
+      setRowEditingNoteDescription("");
+      setRowActionError("");
     };
 
     return (
@@ -1531,11 +1629,13 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         {rowActiveAction && (
           <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, marginBottom: 20 }}>
             <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {rowActiveAction}</h4>
-            <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-              <input type="date" value={rowActionDate} onChange={e => setRowActionDate(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 170 }} />
-              <input type="time" value={rowActionTime} onChange={e => setRowActionTime(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 140 }} />
-              {rowActiveAction === "Meeting" && <input type="text" placeholder="Meeting place" value={rowMeetingPlace} onChange={e => setRowMeetingPlace(e.target.value)} style={{ flex: 1, padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8 }} />}
-            </div>
+            {(rowActiveAction !== "Note" || manualActionTimestampMode) && (
+              <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                <input type="date" value={rowActionDate} onChange={e => setRowActionDate(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 170 }} />
+                <input type="time" value={rowActionTime} onChange={e => setRowActionTime(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 140 }} />
+                {rowActiveAction === "Meeting" && <input type="text" placeholder="Meeting place" value={rowMeetingPlace} onChange={e => setRowMeetingPlace(e.target.value)} style={{ flex: 1, padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8 }} />}
+              </div>
+            )}
             <div style={{ marginBottom: 16 }}>
               <label style={{ fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 8, display: "block" }}>Details * (required)</label>
               <textarea value={rowActionDescription} onChange={e => setRowActionDescription(e.target.value)} onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, rowActionDescription, setRowActionDescription)} rows={4} style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }} placeholder="Add details here..." />
@@ -1622,11 +1722,32 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                                         Follow-up: {entry.followUpDate || "Date pending"}{entry.followUpTime ? ` at ${entry.followUpTime}` : ""}
                                       </div>
                                     )}
-                                   {entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{entry.description}</div>}
+                                   {rowEditingNoteId === entry.id ? (
+                                     <div style={{ display: "grid", gap: 10 }}>
+                                       <textarea
+                                         value={rowEditingNoteDescription}
+                                         onChange={e => setRowEditingNoteDescription(e.target.value)}
+                                         onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, rowEditingNoteDescription, setRowEditingNoteDescription)}
+                                         rows={4}
+                                         style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }}
+                                       />
+                                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                         <button type="button" onClick={() => saveEditedRowNote(entry.id)} style={S.btnPrimary}>Save Note</button>
+                                         <button type="button" onClick={cancelEditingRowNote} style={S.btnOutline}>Cancel</button>
+                                       </div>
+                                     </div>
+                                   ) : (
+                                     entry.description && <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{entry.description}</div>
+                                   )}
+                         </div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                          {entry.category === "note" && rowEditingNoteId !== entry.id && (
+                            <button type="button" onClick={() => startEditingRowNote(entry)} style={{ border: "none", background: "transparent", color: "#64748b", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "2px 0" }}>Edit</button>
+                          )}
+                          <button type="button" onClick={() => setRowActionDeleteModal({ index: originalIndex, action: entry })} style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer" }} aria-label={`Delete ${entry.title}`}>
+                            x
+                          </button>
                         </div>
-                        <button type="button" onClick={() => setRowActionDeleteModal({ index: originalIndex, action: entry })} style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer" }} aria-label={`Delete ${entry.title}`}>
-                          x
-                        </button>
                       </div>
                     </div>
                   </div>
@@ -1963,8 +2084,14 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       {activeAction && (
         <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, marginBottom: 20 }}>
           <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
-          {activeAction !== "Note" && (
+          {(activeAction !== "Note" || manualActionTimestampMode) && (
             <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+              <input
+                type="date"
+                value={actionDate}
+                onChange={e => setActionDate(e.target.value)}
+                style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 170 }}
+              />
               <input
                 type="time"
                 value={actionTime}
@@ -3139,22 +3266,43 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                                     Follow-up: {entry.followUpDate || "Date pending"}{entry.followUpTime ? ` at ${entry.followUpTime}` : ""}
                                   </div>
                                 )}
-                                {entry.description && (
-                                  <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
-                                    {entry.description}
+                                {editingTimelineNoteId === entry.id ? (
+                                  <div style={{ display: "grid", gap: 10 }}>
+                                    <textarea
+                                      value={editingTimelineNoteDescription}
+                                      onChange={e => setEditingTimelineNoteDescription(e.target.value)}
+                                      onPaste={(e) => handleNormalizedTextareaPasteRichV2(e, editingTimelineNoteDescription, setEditingTimelineNoteDescription)}
+                                      rows={4}
+                                      style={{ width: "100%", padding: "12px", border: "1px solid #e2e8f0", borderRadius: 8, resize: "vertical" }}
+                                    />
+                                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                      <button type="button" onClick={() => saveEditedTimelineNote(entry.id)} style={S.btnPrimary}>Save Note</button>
+                                      <button type="button" onClick={cancelEditingTimelineNote} style={S.btnOutline}>Cancel</button>
+                                    </div>
                                   </div>
+                                ) : (
+                                  entry.description && (
+                                    <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
+                                      {entry.description}
+                                    </div>
+                                  )
                                 )}
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => setActionDeleteModal({ index: originalIndex, action: entry })}
-                                style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer" }}
-                                onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
-                                onMouseLeave={(e) => (e.currentTarget.style.color = "#94a3b8")}
-                                aria-label={`Delete ${entry.title}`}
-                              >
-                                x
-                              </button>
+                              <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                                {entry.category === "note" && editingTimelineNoteId !== entry.id && (
+                                  <button type="button" onClick={() => startEditingTimelineNote(entry)} style={{ border: "none", background: "transparent", color: "#64748b", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "2px 0" }}>Edit</button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setActionDeleteModal({ index: originalIndex, action: entry })}
+                                  style={{ border: "none", background: "transparent", color: "#94a3b8", fontSize: 16, cursor: "pointer" }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                                  onMouseLeave={(e) => (e.currentTarget.style.color = "#94a3b8")}
+                                  aria-label={`Delete ${entry.title}`}
+                                >
+                                  x
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
