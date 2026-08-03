@@ -553,6 +553,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const [showColModal, setShowColModal] = useState(false);
   const [handledByFilter, setHandledByFilter] = useState("All");
   const [expandedRemarks, setExpandedRemarks] = useState<Record<string, boolean>>({});
+  const [expandedLastActionComments, setExpandedLastActionComments] = useState<Record<string, boolean>>({});
   const [activeAction, setActiveAction] = useState<"Note" | "Call" | "Meeting" | null>(null);
   const [manualActionTimestampMode, setManualActionTimestampMode] = useState(false);
   const [editingProspectNoteId, setEditingProspectNoteId] = useState<string | null>(null);
@@ -789,12 +790,23 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       return;
     }
 
+    const followUpChanged =
+      String((previousLead as any)?.followUpDate || "") !== String((formData as any).followUpDate || "") ||
+      String((previousLead as any)?.followUpTime || "") !== String((formData as any).followUpTime || "");
+    const nextFollowUpOwnerUsername =
+      (formData as any).followUpDate || (formData as any).followUpTime
+        ? followUpChanged
+          ? user.username
+          : String((previousLead as any)?.followUpOwnerUsername || user.username)
+        : "";
+
     const payload = {
       ...formData,
       remarks: normalizeLeadTextRichV2(formData.remarks || ""),
       prospectType: formData.prospectType.trim(),
       handledBy: String((formData as any).handledBy || "").trim(),
       url: String((formData as any).url || "").trim(),
+      followUpOwnerUsername: nextFollowUpOwnerUsername,
       statusComment,
       actions: normalizeLeadTimelineEntries((formData as any).actions || []),
       leadId: formData.leadId || generateLeadId(),
@@ -1698,9 +1710,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           <table style={S.table}>
             <thead>
               <tr>
-                {(["Prospect Date","Client Name","Initiated By","Managed By","Client SPOC","Client Email","Client Phone",
+                {(["Prospect Date","Client Name","Status","Initiated By","Managed By","Client SPOC","Client Email","Client Phone",
                   "Partner SPOC","Partner Designation","Partner Email","Partner Phone",
-                  "Status","Last Action Comment","Remarks"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map((h) => (
+                  "Last Action Comment","Remarks"] as string[]).filter(h => visibleCols[h]).concat(["Actions"]).map((h) => (
                   <th key={h} style={h === "Actions" ? S.thSticky : h === "Client Name" ? S.thClientSticky : S.th}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{h}</span>
                   </th>
@@ -1736,6 +1748,12 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                       </button>
                     </td>
                   )}
+                  {visibleCols["Status"] && <td style={S.td}>
+                    <select value={lead.status} onChange={(e) => updateStatus(lead, e.target.value)}
+                      style={{ ...S.statusSelect, background: STATUS_COLORS[lead.status]?.bg, color: STATUS_COLORS[lead.status]?.color }}>
+                      {STATUSES.map((s) => <option key={s}>{s}</option>)}
+                    </select>
+                  </td>}
                   {visibleCols["Initiated By"] && <td style={S.td}>{(lead as any).handledBy || "-"}</td>}
                   {visibleCols["Managed By"] && <td style={S.td}>{latestAssignedAction?.assignedTo || "-"}</td>}
                   {visibleCols["Client SPOC"] && <td style={S.td}>{lead.clientSpoc}</td>}
@@ -1749,14 +1767,23 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                     {lead.partnerEmail ? <a href={`mailto:${lead.partnerEmail}`} style={{ color: "#2563eb" }}>{lead.partnerEmail}</a> : "-"}
                   </td>}
                   {visibleCols["Partner Phone"] && <td style={S.td}>{formatPhoneWithCountryCode((lead as any).partnerCountryCode, lead.partnerPhone) || "-"}</td>}
-                  {visibleCols["Status"] && <td style={S.td}>
-                    <select value={lead.status} onChange={(e) => updateStatus(lead, e.target.value)}
-                      style={{ ...S.statusSelect, background: STATUS_COLORS[lead.status]?.bg, color: STATUS_COLORS[lead.status]?.color }}>
-                      {STATUSES.map((s) => <option key={s}>{s}</option>)}
-                    </select>
-                  </td>}
                   {visibleCols["Last Action Comment"] && <td style={{ ...S.td, minWidth: 220, maxWidth: 280, whiteSpace: "pre-wrap", color: "#64748b", fontSize: 12 }}>
-                    {latestAction?.description ? getRemarksPreview(latestAction.description, 180) : <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No actions</span>}
+                    {latestAction?.description ? (
+                      <span>
+                        <span title={normalizeLeadTextRichV2(latestAction.description)}>
+                          {expandedLastActionComments[lead.id] ? normalizeLeadTextRichV2(latestAction.description) : getRemarksPreview(latestAction.description, 180)}
+                        </span>
+                        {normalizeLeadTextRichV2(latestAction.description).length > 180 && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedLastActionComments((prev) => ({ ...prev, [lead.id]: !prev[lead.id] }))}
+                            style={{ display: "block", marginTop: 6, border: "none", background: "none", color: "#2563eb", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}
+                          >
+                            {expandedLastActionComments[lead.id] ? "Show less" : "Show more"}
+                          </button>
+                        )}
+                      </span>
+                    ) : <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No actions</span>}
                   </td>}
                   {visibleCols["Remarks"] && <td style={{ ...S.td, minWidth: 200, maxWidth: 240, color: "#64748b", fontSize: 12, whiteSpace: "pre-wrap" }}>
                     {lead.remarks ? (
@@ -1826,7 +1853,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
             </div>
 
             {[
-              { title: "Prospect Info", cols: ["Prospect Date", "Client Name", "Initiated By", "Managed By", "Status", "Last Action Comment", "Remarks"] },
+              { title: "Prospect Info", cols: ["Prospect Date", "Client Name", "Status", "Initiated By", "Managed By", "Last Action Comment", "Remarks"] },
               { title: "Client SPOC", cols: ["Client SPOC", "Client Email", "Client Phone"] },
               { title: "Partner SPOC", cols: ["Partner SPOC", "Partner Designation", "Partner Email", "Partner Phone"] },
             ].map(({ title, cols }) => (
@@ -2188,7 +2215,8 @@ const S: Record<string, React.CSSProperties> = {
     letterSpacing: "0.04em",
   },
   tableWrap: {
-    overflowX: "auto",
+    overflow: "auto",
+    maxHeight: "calc(100vh - 260px)",
     borderRadius: 12,
     border: "1px solid #e2e8f0",
     background: "#fff",
@@ -2210,6 +2238,7 @@ const S: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #e2e8f0",
     position: "sticky",
     top: 0,
+    zIndex: 5,
   },
   thSticky: {
     padding: "12px 14px",
@@ -2223,7 +2252,7 @@ const S: Record<string, React.CSSProperties> = {
     position: "sticky",
     top: 0,
     right: 0,
-    zIndex: 3,
+    zIndex: 7,
     boxShadow: "-2px 0 6px rgba(0,0,0,0.06)",
   },
   thClientSticky: {
@@ -2238,7 +2267,7 @@ const S: Record<string, React.CSSProperties> = {
     position: "sticky",
     top: 0,
     left: 0,
-    zIndex: 4,
+    zIndex: 8,
     boxShadow: "2px 0 6px rgba(0,0,0,0.06)",
   },
   tdSticky: {

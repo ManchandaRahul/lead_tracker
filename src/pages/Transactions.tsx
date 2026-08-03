@@ -25,6 +25,12 @@ const STAGE_COLORS: Record<string, { bg: string; color: string }> = {
 
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
 
+function getTextPreview(value?: string, maxLength = 140) {
+  const normalized = normalizeActionTextRichV2(String(value || ""));
+  if (!normalized) return "";
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength).trimEnd()}...` : normalized;
+}
+
 type DealItem = {
   itemName: string;
   description: string;
@@ -473,6 +479,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   const [manualActionTimestampMode, setManualActionTimestampMode] = useState(false);
   const [editingTimelineNoteId, setEditingTimelineNoteId] = useState<string | null>(null);
   const [editingTimelineNoteDescription, setEditingTimelineNoteDescription] = useState("");
+  const [expandedLeadNotes, setExpandedLeadNotes] = useState<Record<string, boolean>>({});
   const [actionTime, setActionTime] = useState("11:31");
   const [meetingPlace, setMeetingPlace] = useState("");
   const [actionDescription, setActionDescription] = useState("");
@@ -853,11 +860,22 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     if (editingId) {
       await persistExistingActivity(editingId, formData, previousActivity, deletedActionLogs);
     } else {
+      const followUpChanged =
+        String((previousActivity as any)?.followUpDate || "") !== String(formData.followUpDate || "") ||
+        String((previousActivity as any)?.followUpTime || "") !== String(formData.followUpTime || "");
+      const nextFollowUpOwnerUsername =
+        formData.followUpDate || formData.followUpTime
+          ? followUpChanged
+            ? user.username
+            : String((previousActivity as any)?.followUpOwnerUsername || user.username)
+          : "";
+
       const basePayload = {
         ...formData,
         stage: normalizeStageValue(formData.stage),
         notes: normalizeActionTextRichV2(formData.notes || ""),
         actions: normalizeTimelineEntries(formData.actions || []),
+        followUpOwnerUsername: nextFollowUpOwnerUsername,
         transactionId: formData.transactionId || generateActivityId(),
         activityDate: formData.activityDate || new Date().toISOString().slice(0, 10),
         updatedAt: new Date().toISOString(),
@@ -891,11 +909,22 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     previousActivity: Activity | null,
     deletedActionsToLog: { action: any; reason: string; deletedAt: string }[] = []
   ) => {
+    const followUpChanged =
+      String((previousActivity as any)?.followUpDate || "") !== String(sourceData.followUpDate || "") ||
+      String((previousActivity as any)?.followUpTime || "") !== String(sourceData.followUpTime || "");
+    const nextFollowUpOwnerUsername =
+      sourceData.followUpDate || sourceData.followUpTime
+        ? followUpChanged
+          ? user.username
+          : String((previousActivity as any)?.followUpOwnerUsername || user.username)
+        : "";
+
     const basePayload = {
       ...sourceData,
       stage: normalizeStageValue(sourceData.stage),
       notes: normalizeActionTextRichV2(sourceData.notes || ""),
       actions: normalizeTimelineEntries(sourceData.actions || []),
+      followUpOwnerUsername: nextFollowUpOwnerUsername,
       transactionId: sourceData.transactionId || generateActivityId(),
       activityDate: sourceData.activityDate || new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString(),
@@ -3360,13 +3389,44 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                     {visibleCols["Initiated By"] && <td style={S.td}>{a.handledBy || "-"}</td>}
                     {visibleCols["Managed By"] && <td style={S.td}>{getLatestAssignedAction(a.actions || [])?.assignedTo || "-"}</td>}
                     {visibleCols["Notes"] && <td style={{ ...S.td, minWidth: 200, maxWidth: 260, whiteSpace: "pre-wrap", color: "#64748b", fontSize: 12 }}>
-                      {a.notes || <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No notes</span>}
+                      {a.notes ? (
+                        <span>
+                          <span title={normalizeActionTextRichV2(a.notes)}>
+                            {expandedLeadNotes[a.id] ? normalizeActionTextRichV2(a.notes) : getTextPreview(a.notes, 180)}
+                          </span>
+                          {normalizeActionTextRichV2(a.notes).length > 180 && (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedLeadNotes((prev) => ({ ...prev, [a.id]: !prev[a.id] }))}
+                              style={{ display: "block", marginTop: 6, border: "none", background: "none", color: "#2563eb", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}
+                            >
+                              {expandedLeadNotes[a.id] ? "Show less" : "Show more"}
+                            </button>
+                          )}
+                        </span>
+                      ) : <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>No notes</span>}
                     </td>}
                   <td style={S.tdSticky}>
-                    <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
-                      <button onClick={() => onNavigate("activityDetail", a.transactionId || a.id)} style={S.txnBtn}>View Action</button>
-                      <button onClick={() => startEdit(a)} style={S.editBtn}>Edit</button>
-                      <button onClick={() => deleteActivity(a)} style={S.deleteBtn}>Delete</button>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <button onClick={() => onNavigate("activityDetail", a.transactionId || a.id)} style={S.iconBtnWarn} title="Open lead" aria-label="Open lead">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 12h18" />
+                          <path d="m12 5 7 7-7 7" />
+                        </svg>
+                      </button>
+                      <button onClick={() => startEdit(a)} style={S.iconBtn} title="Edit lead" aria-label="Edit lead">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                        </svg>
+                      </button>
+                      <button onClick={() => deleteActivity(a)} style={S.iconBtnDanger} title="Delete lead" aria-label="Delete lead">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 6h18" />
+                          <path d="M8 6V4h8v2" />
+                          <path d="M19 6l-1 14H6L5 6" />
+                        </svg>
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -3483,13 +3543,49 @@ const S: Record<string, React.CSSProperties> = {
   formField: { display: "flex", flexDirection: "column" },
   fLabel: { fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 5 },
   fInput: { padding: "9px 12px", borderRadius: 8, border: "1.5px solid #e2e8f0", fontSize: 13, background: "#f8fafc", outline: "none", color: "#0f172a", width: "100%", boxSizing: "border-box" },
-  tableWrap: { overflowX: "auto", borderRadius: 12, border: "1px solid #cfd9e8", background: "#fff", boxShadow: "0 4px 18px rgba(15,23,42,0.06)" },
+  tableWrap: { overflow: "auto", maxHeight: "calc(100vh - 260px)", borderRadius: 12, border: "1px solid #cfd9e8", background: "#fff", boxShadow: "0 4px 18px rgba(15,23,42,0.06)" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
-  th: { padding: "13px 14px", textAlign: "left", background: "#edf4ff", color: "#1e3a5f", fontWeight: 800, fontSize: 12, whiteSpace: "nowrap", borderBottom: "2px solid #cbdcf6", borderRight: "1px solid #dbe7f8", position: "sticky", top: 0 },
-  thSticky: { padding: "13px 14px", textAlign: "left", background: "#edf4ff", color: "#1e3a5f", fontWeight: 800, fontSize: 12, whiteSpace: "nowrap", borderBottom: "2px solid #cbdcf6", position: "sticky", top: 0, right: 0, zIndex: 3, boxShadow: "-2px 0 6px rgba(0,0,0,0.06)" },
+  th: { padding: "13px 14px", textAlign: "left", background: "#edf4ff", color: "#1e3a5f", fontWeight: 800, fontSize: 12, whiteSpace: "nowrap", borderBottom: "2px solid #cbdcf6", borderRight: "1px solid #dbe7f8", position: "sticky", top: 0, zIndex: 5 },
+  thSticky: { padding: "13px 14px", textAlign: "left", background: "#edf4ff", color: "#1e3a5f", fontWeight: 800, fontSize: 12, whiteSpace: "nowrap", borderBottom: "2px solid #cbdcf6", position: "sticky", top: 0, right: 0, zIndex: 7, boxShadow: "-2px 0 6px rgba(0,0,0,0.06)" },
   tdSticky: { padding: "12px 14px", color: "#334155", verticalAlign: "top", fontSize: 13, position: "sticky", right: 0, background: "#ffffff", zIndex: 1, boxShadow: "-2px 0 6px rgba(0,0,0,0.06)", borderLeft: "1px solid #e2e8f0" },
   tr: { borderBottom: "1px solid #dbe4f0", transition: "background 0.15s" },
   td: { padding: "12px 14px", color: "#334155", verticalAlign: "top", fontSize: 13, borderRight: "1px solid #f1f5f9" },
+  iconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    border: "1px solid #dbe4f0",
+    background: "#ffffff",
+    color: "#2563eb",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  },
+  iconBtnWarn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    border: "1px solid #fde68a",
+    background: "#fffbeb",
+    color: "#d97706",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  },
+  iconBtnDanger: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    border: "1px solid #fecaca",
+    background: "#fef2f2",
+    color: "#dc2626",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  },
   txnBtn: { padding: "5px 10px", background: "#fef9c3", color: "#b45309", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 12 },
   editBtn: { padding: "5px 10px", background: "#eff6ff", color: "#2563eb", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 12 },
   deleteBtn: { padding: "5px 10px", background: "#fef2f2", color: "#dc2626", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 12 },

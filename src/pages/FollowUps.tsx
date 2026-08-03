@@ -63,6 +63,10 @@ type FollowUpItem = {
   routeId: string;
 };
 
+function normalizeUserKey(value: unknown) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
   return entries.map((entry, index) => {
     const createdAt = entry.createdAt || entry.timestamp || new Date().toISOString();
@@ -84,6 +88,10 @@ function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
 
 export default function FollowUps({ onNavigate }: { onNavigate: (p: Page, leadId?: string) => void }) {
   const user = getSessionUser();
+  const isPrimaryAdmin =
+    user.role === "admin" &&
+    user.username === "admin" &&
+    user.email === "admin@leadtracker.app";
   const isAdmin = user.role === "admin";
   const restrictedLeadIds = getAllowedLeadIds(user);
   const restrictedLeadSet = new Set(restrictedLeadIds);
@@ -91,7 +99,7 @@ export default function FollowUps({ onNavigate }: { onNavigate: (p: Page, leadId
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"next" | "today" | "missed">("next");
+  const [filter, setFilter] = useState<"next" | "today" | "missed">("today");
 
   useEffect(() => {
     const unsubLeads = onSnapshot(collection(db, "leads"), (snap) => {
@@ -199,10 +207,14 @@ export default function FollowUps({ onNavigate }: { onNavigate: (p: Page, leadId
     return new Date(aKey).getTime() - new Date(bKey).getTime();
   });
 
-  const todayCount = followUpItems.filter((item) => isTodayFollowUp(item.followUpDate)).length;
-  const missedCount = followUpItems.filter((item) => isMissedFollowUp(item.followUpDate, item.followUpTime) && !isTodayFollowUp(item.followUpDate)).length;
+  const visibleFollowUpItems = isPrimaryAdmin
+    ? followUpItems
+    : followUpItems.filter((item) => normalizeUserKey(item.handledBy) === normalizeUserKey(user.username));
 
-  const filteredItems = followUpItems.filter((item) => {
+  const todayCount = visibleFollowUpItems.filter((item) => isTodayFollowUp(item.followUpDate)).length;
+  const missedCount = visibleFollowUpItems.filter((item) => isMissedFollowUp(item.followUpDate, item.followUpTime) && !isTodayFollowUp(item.followUpDate)).length;
+
+  const filteredItems = visibleFollowUpItems.filter((item) => {
     if (filter === "today" && !isTodayFollowUp(item.followUpDate)) return false;
     if (filter === "missed" && (!isMissedFollowUp(item.followUpDate, item.followUpTime) || isTodayFollowUp(item.followUpDate))) return false;
     if (filter === "next" && (isTodayFollowUp(item.followUpDate) || isMissedFollowUp(item.followUpDate, item.followUpTime))) return false;
@@ -257,8 +269,8 @@ export default function FollowUps({ onNavigate }: { onNavigate: (p: Page, leadId
           <span style={S.statNumber}>{missedCount}</span>
           <span style={S.statLabel}>Missed Follow Ups</span>
         </button>
-        <button type="button" onClick={() => setFilter("next")} style={{ ...S.statCard, ...(filter === "next" ? S.statCardActive : {}) }}>
-          <span style={S.statNumber}>{followUpItems.filter((item) => item.followUpDate > formatLocalDateKey()).length}</span>
+          <button type="button" onClick={() => setFilter("next")} style={{ ...S.statCard, ...(filter === "next" ? S.statCardActive : {}) }}>
+          <span style={S.statNumber}>{visibleFollowUpItems.filter((item) => item.followUpDate > formatLocalDateKey()).length}</span>
           <span style={S.statLabel}>Next Follow Ups</span>
         </button>
       </div>
