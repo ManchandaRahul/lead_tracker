@@ -67,6 +67,17 @@ const EMPTY_LEAD = {
   actions: [] as LeadTimelineEntry[],
 };
 
+function getTodayDateValue() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function createEmptyLead() {
+  return {
+    ...EMPTY_LEAD,
+    leadDate: getTodayDateValue(),
+  };
+}
+
 type Lead = typeof EMPTY_LEAD & { id: string; createdAt?: string };
 type TimelineCategory = "note" | "call" | "meeting";
 type LeadTimelineEntry = {
@@ -545,7 +556,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ ...EMPTY_LEAD });
+  const [formData, setFormData] = useState(createEmptyLead());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [savingLead, setSavingLead] = useState(false);
@@ -866,7 +877,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   };
 
   const resetForm = () => {
-    setFormData({ ...EMPTY_LEAD });
+    setFormData(createEmptyLead());
     setEditingId(null);
     setShowForm(false);
     setFormErrors({});
@@ -1317,7 +1328,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           </label>
           <button onClick={downloadExcel} style={S.btnDark}>Export Excel</button>
           <button
-            onClick={() => { setShowForm(true); setEditingId(null); setFormData({ ...EMPTY_LEAD }); }}
+            onClick={() => { setShowForm(true); setEditingId(null); setFormData(createEmptyLead()); }}
             style={S.btnPrimary}
           >
             + Add Prospect
@@ -1340,7 +1351,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                 <input
                   type="date"
                   style={S.fInput}
-                  value={formData.leadDate || new Date().toISOString().slice(0, 10)}
+                  value={formData.leadDate || ""}
                   onChange={(e) => setFormData({ ...formData, leadDate: e.target.value })}
                 />
               </div>
