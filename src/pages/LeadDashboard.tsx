@@ -224,6 +224,15 @@ function normalizePhone(value: unknown) {
   return String(value || "").replace(/[^\d]/g, "");
 }
 
+function normalizeWebsiteUrl(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (/^www\./i.test(raw)) return `https://${raw}`;
+  if (/^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+([/?#].*)?$/i.test(raw)) return `https://${raw}`;
+  return raw;
+}
+
 function normalizeImportedStatus(value: unknown) {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return "";
@@ -752,8 +761,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     if (formData.partnerPhone && !/^[\d ]+$/.test(formData.partnerPhone)) {
       errors.partnerPhone = "Phone number can contain digits and spaces only";
     }
-    if (formData.url && !/^https?:\/\//i.test(formData.url.trim())) {
-      errors.url = "URL must start with http:// or https://";
+    const normalizedUrl = normalizeWebsiteUrl(formData.url);
+    if (normalizedUrl && !/^https?:\/\/[^\s]+$/i.test(normalizedUrl)) {
+      errors.url = "Please enter a valid website URL";
     }
     if (!editingId && !formData.prospectType.trim()) {
       errors.prospectType = "Please select the prospect type";
@@ -816,7 +826,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       remarks: normalizeLeadTextRichV2(formData.remarks || ""),
       prospectType: formData.prospectType.trim(),
       handledBy: String((formData as any).handledBy || "").trim(),
-      url: String((formData as any).url || "").trim(),
+      url: normalizeWebsiteUrl((formData as any).url),
       followUpOwnerUsername: nextFollowUpOwnerUsername,
       statusComment,
       actions: normalizeLeadTimelineEntries((formData as any).actions || []),
