@@ -764,7 +764,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       errors.partnerPhone = "Phone number can contain digits and spaces only";
     }
     const normalizedUrl = normalizeWebsiteUrl(formData.url);
-    if (normalizedUrl && !/^https?:\/\/[^\s]+$/i.test(normalizedUrl)) {
+    if (normalizedUrl && !/^www\.[^\s]+\.[^\s]+$/i.test(normalizedUrl)) {
       errors.url = "Please enter a valid website URL";
     }
     if (!editingId && !formData.prospectType.trim()) {
