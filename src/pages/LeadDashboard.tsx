@@ -227,9 +227,11 @@ function normalizePhone(value: unknown) {
 function normalizeWebsiteUrl(value: unknown) {
   const raw = String(value || "").trim();
   if (!raw) return "";
-  if (/^https?:\/\//i.test(raw)) return raw;
-  if (/^www\./i.test(raw)) return `https://${raw}`;
-  if (/^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+([/?#].*)?$/i.test(raw)) return `https://${raw}`;
+  const withoutProtocol = raw.replace(/^https?:\/\//i, "");
+  if (/^www\./i.test(withoutProtocol)) return withoutProtocol;
+  if (/^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+([/?#].*)?$/i.test(withoutProtocol)) {
+    return `www.${withoutProtocol.replace(/^www\./i, "")}`;
+  }
   return raw;
 }
 
