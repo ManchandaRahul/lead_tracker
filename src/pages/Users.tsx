@@ -6,7 +6,7 @@ import { logActivity } from "../firebase/activityLog";
 import AppPageHeader from "../components/AppPageHeader";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import { Page } from "../navigation";
-import { getSessionUser } from "../accessControl";
+import { getSessionUser, isPrimaryAdmin } from "../accessControl";
 
 type AppUser = {
   id: string;
@@ -40,9 +40,7 @@ const EMPTY_USER_FORM = {
 export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: string) => void }) {
   const sessionUser = getSessionUser();
   const isAdmin = sessionUser.role === "admin";
-  const isRootPasswordAdmin =
-    sessionUser.username === "admin" &&
-    sessionUser.email === "admin@leadtracker.app";
+  const isRootPasswordAdmin = isPrimaryAdmin(sessionUser);
   const logout = () => { signOut(auth); localStorage.removeItem("leadUser"); window.location.reload(); };
 
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -102,6 +100,10 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isRootPasswordAdmin) {
+      setMessage({ type: "error", text: "Only the primary admin account can create users." });
+      return;
+    }
     setSaving(true);
     setMessage(null);
 
@@ -255,9 +257,15 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
         showAdminBadge
         bottomContent={
           <div style={S.headerRight}>
-            <button onClick={() => { setMessage(null); setShowCreateForm((prev) => !prev); }} style={S.btnPrimary}>
-              {showCreateForm ? "Close Form" : "+ Add User"}
-            </button>
+            {isRootPasswordAdmin ? (
+              <button onClick={() => { setMessage(null); setShowCreateForm((prev) => !prev); }} style={S.btnPrimary}>
+                {showCreateForm ? "Close Form" : "+ Add User"}
+              </button>
+            ) : (
+              <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
+                Only the primary admin can add users.
+              </div>
+            )}
           </div>
         }
       />
@@ -274,7 +282,7 @@ export default function Users({ onNavigate }: { onNavigate: (p: Page, leadId?: s
         </div>
       )}
 
-      {showCreateForm && (
+      {showCreateForm && isRootPasswordAdmin && (
         <div style={S.formCard}>
           <div style={S.formHeader}>
             <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Create User</h2>

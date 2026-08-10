@@ -17,7 +17,12 @@ import DeleteModal from "../components/DeleteModal";
 import AppHeaderNav from "../components/AppHeaderNav";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import { Page } from "../navigation";
-import { canAccessLead, getAllowedLeadIds, getSessionUser, isRestrictedUser } from "../accessControl";
+import {
+  canUserSeeProspect,
+  getSessionUser,
+  getRecordCollaborators,
+  isPrimaryAdmin,
+} from "../accessControl";
 import { getBusinessDayError, isBusinessDay } from "../utils/followUps";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -63,6 +68,7 @@ const EMPTY_LEAD = {
   statusComment: "",
   followUpDate: "",
   followUpTime: "",
+  recordViewableBy: [] as string[],
   remarks: "",
   actions: [] as LeadTimelineEntry[],
 };
@@ -99,6 +105,8 @@ type LeadTransactionRef = {
   transactionId?: string;
   createdAt?: string;
   updatedAt?: string;
+  handledBy?: string;
+  actions?: Array<{ assignedTo?: string | null }>;
 };
 type ProspectLinkedLead = {
   linkedLeadId: string;
@@ -233,6 +241,10 @@ function normalizeWebsiteUrl(value: unknown) {
     return `www.${withoutProtocol.replace(/^www\./i, "")}`;
   }
   return raw;
+}
+
+function isPrimaryAdminUsername(value: unknown) {
+  return String(value || "").trim().toLowerCase() === "admin";
 }
 
 function normalizeImportedStatus(value: unknown) {
@@ -557,8 +569,7 @@ function Tooltip({ text }: { text: string }) {
 export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, leadId?: string) => void }) {
   const user    = getSessionUser();
   const isAdmin = user.role === "admin";
-  const restrictedLeadIds = getAllowedLeadIds(user);
-  const restrictedLeadSet = new Set(restrictedLeadIds);
+  const isSuperAdmin = isPrimaryAdmin(user);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
 
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -642,6 +653,8 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
           transactionId: d.data().transactionId || d.id,
           createdAt: d.data().createdAt,
           updatedAt: d.data().updatedAt,
+          handledBy: d.data().handledBy,
+          actions: Array.isArray(d.data().actions) ? d.data().actions : [],
         }))
       );
     });
@@ -670,11 +683,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   }, [leads, editingId, importResult]);
 
   const openLeadActions = (lead: Lead) => {
-    if (!canAccessLead(user, lead.leadId)) return;
-
-    const relatedTransactions = (isRestrictedUser(user)
-      ? transactions.filter((transaction) => restrictedLeadSet.has(transaction.leadId))
-      : transactions)
+    const relatedTransactions = transactions
       .filter((transaction) => transaction.leadId === lead.leadId)
       .sort((a, b) => {
         const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
@@ -690,10 +699,29 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     onNavigate("transactions", lead.leadId);
   };
 
+  const getProspectAssignableUsers = (leadDraft: Partial<Lead>) => {
+    if (isSuperAdmin) return assignableUsers;
+    const collaborators = getRecordCollaborators(
+      String((leadDraft as any).handledBy || "").trim(),
+      ((leadDraft as any).actions || []) as Array<{ assignedTo?: string | null }>
+    );
+    if (collaborators.length <= 1) return assignableUsers;
+    return assignableUsers.filter((username) => collaborators.includes(username));
+  };
+
+  const selectedRecordViewableByUsers = Array.from(
+    new Set(
+      (Array.isArray((formData as any).recordViewableBy) ? (formData as any).recordViewableBy : [])
+        .map((value: string) => String(value || "").trim())
+        .filter((value: string) => Boolean(value) && !isPrimaryAdminUsername(value))
+    )
+  );
+  const recordViewableByOptions = assignableUsers.filter(
+    (username) => !isPrimaryAdminUsername(username) && !selectedRecordViewableByUsers.includes(username)
+  );
+
   // ── Filtered + sorted leads ──
-  const visibleLeads = isRestrictedUser(user)
-    ? leads.filter((lead) => restrictedLeadSet.has(lead.leadId))
-    : leads;
+  const visibleLeads = leads.filter((lead) => canUserSeeProspect(user, lead as any));
 
   const handledByOptions = Array.from(
     new Set(
@@ -743,7 +771,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       errors.leadDate = "Please select the prospect date";
     }
     if (!String((formData as any).handledBy || "").trim()) {
-      errors.handledBy = "Handled By is required";
+      errors.handledBy = "Initiated By is required";
     }
     if (formData.clientEmail && !formData.clientEmail.includes("@")) {
       errors.clientEmail = "Please enter a valid email address containing @";
@@ -829,6 +857,13 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       prospectType: formData.prospectType.trim(),
       handledBy: String((formData as any).handledBy || "").trim(),
       url: normalizeWebsiteUrl((formData as any).url),
+      recordViewableBy: Array.from(
+        new Set(
+          (Array.isArray((formData as any).recordViewableBy) ? (formData as any).recordViewableBy : [])
+            .map((value: string) => String(value || "").trim())
+            .filter((value: string) => Boolean(value) && !isPrimaryAdminUsername(value))
+        )
+      ),
       followUpOwnerUsername: nextFollowUpOwnerUsername,
       statusComment,
       actions: normalizeLeadTimelineEntries((formData as any).actions || []),
@@ -889,7 +924,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   };
 
   const resetForm = () => {
-    setFormData(createEmptyLead());
+    setFormData({
+      ...createEmptyLead(),
+      handledBy: String(user.username || "").trim(),
+    });
     setEditingId(null);
     setShowForm(false);
     setFormErrors({});
@@ -1338,9 +1376,16 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
               disabled={importing}
             />
           </label>
-          <button onClick={downloadExcel} style={S.btnDark}>Export Excel</button>
+          {isSuperAdmin && <button onClick={downloadExcel} style={S.btnDark}>Export Excel</button>}
           <button
-            onClick={() => { setShowForm(true); setEditingId(null); setFormData(createEmptyLead()); }}
+            onClick={() => {
+              setShowForm(true);
+              setEditingId(null);
+              setFormData({
+                ...createEmptyLead(),
+                handledBy: String(user.username || "").trim(),
+              });
+            }}
             style={S.btnPrimary}
           >
             + Add Prospect
@@ -1435,7 +1480,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                 </div>
               )}
               <div style={S.formField}>
-                <label style={S.fLabel}>Handled By *</label>
+                <label style={S.fLabel}>Initiated By *</label>
                 <input
                   style={{ ...S.fInput, borderColor: formErrors.handledBy ? "#ef4444" : "" }}
                   value={(formData as any).handledBy}
@@ -1500,7 +1545,64 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                 />
                 {formErrors.followUpDate && <span style={{ color: "#ef4444", fontSize: 11, marginTop: 3 }}>{formErrors.followUpDate}</span>}
               </div>
-            </div>
+                <div style={{ ...S.formField, gridColumn: "1 / -1" }}>
+                  <label style={S.fLabel}>Record Viewable By</label>
+                  <div style={S.userPickerWrap}>
+                    <div>
+                      <div style={S.userPickerLabel}>Selected Users</div>
+                      <div style={S.userPickerRow}>
+                        {selectedRecordViewableByUsers.length === 0 ? (
+                          <span style={S.userPickerEmpty}>No users selected.</span>
+                        ) : (
+                          selectedRecordViewableByUsers.map((username) => (
+                            <button
+                              key={`selected-${username}`}
+                              type="button"
+                              title={username}
+                              onClick={() =>
+                                setFormData({
+                                  ...formData,
+                                  recordViewableBy: selectedRecordViewableByUsers.filter((value) => value !== username),
+                                })
+                              }
+                              style={{ ...S.userPill, ...S.userPillSelected }}
+                            >
+                              <span style={S.userPillText}>{username}</span>
+                              <span style={S.userPillClose}>×</span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={S.userPickerLabel}>Suggested Users</div>
+                      <div style={S.userPickerRow}>
+                        {recordViewableByOptions.length === 0 ? (
+                          <span style={S.userPickerEmpty}>No more users available.</span>
+                        ) : (
+                          recordViewableByOptions.map((username) => (
+                            <button
+                              key={`suggested-${username}`}
+                              type="button"
+                              title={username}
+                              onClick={() =>
+                                setFormData({
+                                  ...formData,
+                                  recordViewableBy: Array.from(new Set([...selectedRecordViewableByUsers, username])),
+                                })
+                              }
+                              style={S.userPill}
+                            >
+                              <span style={S.userPillPlus}>+</span>
+                              <span style={S.userPillText}>{username}</span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
             {/* Client SPOC */}
             <div style={S.formSection}>
@@ -1578,13 +1680,18 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Actions</h3>
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
-                {(["Note", "Call", "Meeting"] as const).map((type) => (
-                  <button key={type} type="button" onClick={() => openProspectAction(type)} style={S.quickBtn}>
-                    + {type}
-                  </button>
-                ))}
-              </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+                  {(["Note", "Call", "Meeting"] as const).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => openProspectAction(type)}
+                      style={S.quickBtn}
+                    >
+                      + {type}
+                    </button>
+                  ))}
+                </div>
               {activeAction && (
                 <div style={S.inlineActionCard}>
                   <h4 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 600 }}>Add {activeAction}</h4>
@@ -1618,7 +1725,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                     <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
                       <select value={actionAssignedTo} onChange={(e) => setActionAssignedTo(e.target.value)} style={{ ...S.fInput, width: 220 }}>
                         <option value="">Assign to user</option>
-                        {assignableUsers.map((username) => (
+                        {getProspectAssignableUsers(formData).map((username) => (
                           <option key={username} value={username}>{username}</option>
                         ))}
                       </select>
@@ -2151,6 +2258,69 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 14,
     fontWeight: 600,
     cursor: "pointer",
+  },
+  userPickerWrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+    padding: "14px 16px",
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    background: "#f8fafc",
+  },
+  userPickerLabel: {
+    marginBottom: 8,
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.12em",
+  },
+  userPickerRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  userPickerEmpty: {
+    fontSize: 12,
+    color: "#64748b",
+  },
+  userPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    maxWidth: 220,
+    padding: "8px 12px",
+    borderRadius: 9999,
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    color: "#1e3a8a",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  userPillSelected: {
+    border: "1px solid #fca5a5",
+    background: "#fff5f5",
+    color: "#dc2626",
+  },
+  userPillText: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    maxWidth: 160,
+  },
+  userPillPlus: {
+    fontSize: 15,
+    lineHeight: 1,
+    fontWeight: 700,
+    flexShrink: 0,
+  },
+  userPillClose: {
+    fontSize: 14,
+    lineHeight: 1,
+    fontWeight: 700,
+    flexShrink: 0,
   },
   inlineActionCard: {
     marginBottom: 18,

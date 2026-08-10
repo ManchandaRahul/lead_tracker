@@ -4,7 +4,7 @@ import { signOut } from "firebase/auth";
 import { auth, db } from "../firebase/config";
 import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
-import { getAllowedLeadIds, getSessionUser, isRestrictedUser } from "../accessControl";
+import { canUserSeeLead, canUserSeeProspect, getSessionUser } from "../accessControl";
 import { formatLocalDateKey, isMissedFollowUp, isTodayFollowUp } from "../utils/followUps";
 
 type TimelineCategory = "note" | "call" | "meeting" | "deal" | "update";
@@ -32,6 +32,7 @@ type Lead = {
   followUpDate?: string;
   followUpTime?: string;
   actions?: TimelineEntry[];
+  recordViewableBy?: string[];
 };
 
 type Activity = {
@@ -63,10 +64,6 @@ type FollowUpItem = {
   routeId: string;
 };
 
-function normalizeUserKey(value: unknown) {
-  return String(value || "").trim().toLowerCase();
-}
-
 function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
   return entries.map((entry, index) => {
     const createdAt = entry.createdAt || entry.timestamp || new Date().toISOString();
@@ -88,13 +85,7 @@ function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
 
 export default function FollowUps({ onNavigate }: { onNavigate: (p: Page, leadId?: string) => void }) {
   const user = getSessionUser();
-  const isPrimaryAdmin =
-    user.role === "admin" &&
-    user.username === "admin" &&
-    user.email === "admin@leadtracker.app";
   const isAdmin = user.role === "admin";
-  const restrictedLeadIds = getAllowedLeadIds(user);
-  const restrictedLeadSet = new Set(restrictedLeadIds);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,12 +106,10 @@ export default function FollowUps({ onNavigate }: { onNavigate: (p: Page, leadId
     };
   }, []);
 
-  const visibleLeads = isRestrictedUser(user)
-    ? leads.filter((lead) => restrictedLeadSet.has(lead.leadId))
-    : leads;
-  const visibleActivities = isRestrictedUser(user)
-    ? activities.filter((activity) => restrictedLeadSet.has(activity.leadId))
-    : activities;
+  const visibleLeads = leads.filter((lead) => canUserSeeProspect(user, lead as any));
+  const visibleActivities = activities.filter((activity) =>
+    canUserSeeLead(user, activity as any, leads.find((lead) => lead.leadId === activity.leadId) as any)
+  );
 
   const followUpItems: FollowUpItem[] = [
     ...visibleLeads.flatMap((lead) => {
@@ -207,9 +196,7 @@ export default function FollowUps({ onNavigate }: { onNavigate: (p: Page, leadId
     return new Date(aKey).getTime() - new Date(bKey).getTime();
   });
 
-  const visibleFollowUpItems = isPrimaryAdmin
-    ? followUpItems
-    : followUpItems.filter((item) => normalizeUserKey(item.handledBy) === normalizeUserKey(user.username));
+  const visibleFollowUpItems = followUpItems;
 
   const todayCount = visibleFollowUpItems.filter((item) => isTodayFollowUp(item.followUpDate)).length;
   const missedCount = visibleFollowUpItems.filter((item) => isMissedFollowUp(item.followUpDate, item.followUpTime) && !isTodayFollowUp(item.followUpDate)).length;

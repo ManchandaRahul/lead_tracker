@@ -4,7 +4,7 @@ import { signOut } from "firebase/auth";
 import { auth, db } from "../firebase/config";
 import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
-import { getAllowedLeadIds, getSessionUser, isRestrictedUser } from "../accessControl";
+import { canUserSeeLead, getSessionUser } from "../accessControl";
 
 type DealActivity = {
   id: string;
@@ -25,6 +25,13 @@ type DealActivity = {
   dealItems?: Array<{ itemName?: string; description?: string; cost?: string; price?: string }>;
   createdAt?: string;
   updatedAt?: string;
+};
+
+type ProspectRecord = {
+  leadId?: string;
+  handledBy?: string;
+  recordViewableBy?: string[];
+  actions?: Array<{ assignedTo?: string }>;
 };
 
 const DEAL_STAGE_ORDER = [
@@ -74,8 +81,6 @@ function formatWeightedAmount(value?: string, probability?: string, currency?: s
 export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: string) => void }) {
   const user = getSessionUser();
   const isAdmin = user?.role === "admin";
-  const restrictedLeadIds = getAllowedLeadIds(user);
-  const restrictedLeadSet = new Set(restrictedLeadIds);
   const logout = () => {
     signOut(auth);
     localStorage.removeItem("leadUser");
@@ -83,29 +88,36 @@ export default function Deals({ onNavigate }: { onNavigate: (p: Page, leadId?: s
   };
 
   const [deals, setDeals] = useState<DealActivity[]>([]);
+  const [prospects, setProspects] = useState<ProspectRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [ownerFilter, setOwnerFilter] = useState("All team members");
   const [search, setSearch] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState<"all" | "won" | "lost">("all");
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, "transactions"), (snap) => {
+    const unsubscribeDeals = onSnapshot(collection(db, "transactions"), (snap) => {
       const nextDeals = snap.docs
         .map((d) => ({ id: d.id, ...d.data() } as DealActivity))
         .filter((deal) => deal.isDeal);
       setDeals(nextDeals);
       setLoading(false);
     });
+    const unsubscribeProspects = onSnapshot(collection(db, "leads"), (snap) => {
+      setProspects(snap.docs.map((d) => ({ id: d.id, ...d.data() } as any)));
+    });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeDeals();
+      unsubscribeProspects();
+    };
   }, []);
 
   const visibleDeals = useMemo(
     () =>
-      isRestrictedUser(user)
-        ? deals.filter((deal) => restrictedLeadSet.has(deal.leadId || ""))
-        : deals,
-    [deals, restrictedLeadSet, user]
+      deals.filter((deal) =>
+        canUserSeeLead(user, deal as any, prospects.find((prospect) => prospect.leadId === deal.leadId) as any)
+      ),
+    [deals, prospects, user]
   );
 
   const teamMembers = useMemo(() => {

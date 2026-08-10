@@ -8,7 +8,13 @@ import * as XLSX from "xlsx";
 import DeleteModal from "../components/DeleteModal";
 import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
-import { canAccessLead, getAllowedLeadIds, getSessionUser, isRestrictedUser } from "../accessControl";
+import {
+  canUserSeeLead,
+  canUserSeeProspect,
+  getRecordCollaborators,
+  getSessionUser,
+  isPrimaryAdmin,
+} from "../accessControl";
 import { getBusinessDayError, isBusinessDay } from "../utils/followUps";
 
 const STAGES = ["Initiation", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
@@ -122,6 +128,8 @@ type Lead = {
   followUpDate?: string;
   followUpTime?: string;
   remarks?: string;
+  recordViewableBy?: string[];
+  actions?: TimelineEntry[];
 };
 type ProspectLinkedLead = {
   linkedLeadId: string;
@@ -438,8 +446,7 @@ const MAX_TRANSACTION_DOCUMENT_BYTES = 900000;
 export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: (p: Page, leadId?: string) => void; routeLeadId?: string | null }) {
   const user    = getSessionUser();
   const isAdmin = user.role === "admin";
-  const restrictedLeadIds = getAllowedLeadIds(user);
-  const restrictedLeadSet = new Set(restrictedLeadIds);
+  const isSuperAdmin = isPrimaryAdmin(user);
   const logout  = () => { signOut(auth); localStorage.removeItem("leadUser"); window.location.reload(); };
 
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -529,16 +536,27 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
-  const visibleLeads = isRestrictedUser(user)
-    ? leads.filter((lead) => restrictedLeadSet.has(lead.leadId))
-    : leads;
-  const visibleActivities = isRestrictedUser(user)
-    ? activities.filter((activity) => restrictedLeadSet.has(activity.leadId || ""))
-    : activities;
-  const selectedLead = routeLeadId ? visibleLeads.find((lead) => lead.leadId === routeLeadId) || null : null;
+  const visibleLeads = leads.filter((lead) => canUserSeeProspect(user, lead as any));
+  const visibleActivities = activities.filter((activity) =>
+    canUserSeeLead(user, activity as any, leads.find((lead) => lead.leadId === activity.leadId) as any)
+  );
+  const routeLeadRecord = routeLeadId ? leads.find((lead) => lead.leadId === routeLeadId) || null : null;
+  const hasVisibleLeadActivity = (leadId: string) =>
+    activities.some(
+      (activity) =>
+        activity.leadId === leadId &&
+        canUserSeeLead(user, activity as any, leads.find((lead) => lead.leadId === activity.leadId) as any)
+    );
+  const leadWorkspaceLeads = leads.filter(
+    (lead) => canUserSeeProspect(user, lead as any) || hasVisibleLeadActivity(lead.leadId)
+  );
+  const hasRouteLeadAccess = routeLeadId
+    ? !!leadWorkspaceLeads.find((lead) => lead.leadId === routeLeadId)
+    : true;
+  const selectedLead = routeLeadId ? leadWorkspaceLeads.find((lead) => lead.leadId === routeLeadId) || null : null;
   const selectedLeadDetails = getLeadDisplayDetails(selectedLead, selectedLead ? linkedLeads[selectedLead.leadId] : null);
   const formSelectedLead = formData.leadId
-    ? visibleLeads.find((lead) => lead.leadId === formData.leadId) || null
+    ? leadWorkspaceLeads.find((lead) => lead.leadId === formData.leadId) || null
     : null;
   const formSelectedLeadDetails = getLeadDisplayDetails(
     formSelectedLead,
@@ -550,7 +568,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     : visibleActivities;
 
   const getEditableLeadDetails = (leadId: string) => {
-    const lead = visibleLeads.find((item) => item.leadId === leadId) || null;
+    const lead = leadWorkspaceLeads.find((item) => item.leadId === leadId) || null;
     if (!lead) return { ...EMPTY_FORM_LEAD_DETAILS };
     return getLeadDisplayDetails(lead, linkedLeads[lead.leadId] || null);
   };
@@ -561,6 +579,16 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     accountName: selectedLead?.accountName || "",
     handledBy: user.username || "",
   });
+
+  const getLeadAssignableUsers = (activityDraft: Partial<Activity>) => {
+    if (isSuperAdmin) return assignableUsers;
+    const collaborators = getRecordCollaborators(
+      String(activityDraft.handledBy || "").trim(),
+      ((activityDraft.actions || []) as Array<{ assignedTo?: string | null }>)
+    );
+    if (collaborators.length <= 1) return assignableUsers;
+    return assignableUsers.filter((username) => collaborators.includes(username));
+  };
 
   useEffect(() => {
     if (!isLeadWorkspace || !selectedLead || loading) return;
@@ -579,7 +607,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
   ]);
 
   const handleLeadSelect = (leadId: string) => {
-    const lead = visibleLeads.find(l => l.leadId === leadId);
+    const lead = leadWorkspaceLeads.find(l => l.leadId === leadId);
     setFormData(f => ({ ...f, leadId, accountName: lead?.accountName || "" }));
     setFormLeadDetails(getEditableLeadDetails(leadId));
   };
@@ -821,7 +849,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       return;
     }
     if (!String(formData.handledBy || "").trim()) {
-      setImportResult("Please enter Handled By before saving this lead.");
+      setImportResult("Please enter Initiated By before saving this lead.");
       return;
     }
     if (formData.stage === "On Hold") {
@@ -997,7 +1025,9 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const deleteActivity = (a: Activity) => setDeleteModal({ activity: a });
+  const deleteActivity = (a: Activity) => {
+    setDeleteModal({ activity: a });
+  };
 
   const openActivityActions = (a: Activity) => {
     if (actionActivityId === a.id) {
@@ -1245,7 +1275,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     ? timelineEntries
     : timelineEntries.filter(entry => entry.category === timelineFilter);
 
-  const ActivityActionPanel = ({ activity }: { activity: Activity }) => {
+    const ActivityActionPanel = ({ activity }: { activity: Activity }) => {
     const [draft, setDraft] = useState(buildActivityDraft(activity));
     const [rowActiveAction, setRowActiveAction] = useState<"Note" | "Call" | "Meeting" | null>(null);
     const [rowActionTime, setRowActionTime] = useState("11:31");
@@ -1674,7 +1704,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
                 <select value={rowActionAssignedTo} onChange={e => setRowActionAssignedTo(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 220 }}>
                   <option value="">Assign to user</option>
-                  {assignableUsers.map((username) => <option key={username} value={username}>{username}</option>)}
+                  {getLeadAssignableUsers(formData).map((username) => <option key={username} value={username}>{username}</option>)}
                 </select>
               </div>
             )}
@@ -2543,7 +2573,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     );
   }
 
-  if (isLeadWorkspace && routeLeadId && !canAccessLead(user, routeLeadId)) {
+  if (isLeadWorkspace && routeLeadId && !hasRouteLeadAccess) {
     return (
       <div style={S.page}>
         <AppPageHeader
@@ -2556,7 +2586,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
           <div style={S.leadWorkspaceEmpty}>
             <h2 style={{ margin: 0, fontSize: 22, color: "#0f172a" }}>Access denied</h2>
             <p style={{ margin: 0, color: "#64748b", lineHeight: 1.6 }}>
-              This lead is not assigned to your account.
+              This lead is not visible to your account.
             </p>
             <button type="button" onClick={() => onNavigate("leads")} style={S.btnPrimary}>
               Back to Prospects
@@ -2682,7 +2712,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               disabled={importing}
             />
           </label>
-          <button onClick={downloadExcel} style={S.btnDark}>Export Excel</button>
+          {isSuperAdmin && <button onClick={downloadExcel} style={S.btnDark}>Export Excel</button>}
           <button onClick={() => setShowColModal(true)} style={S.btnOutline}>Columns</button>
           <button
             onClick={() => {
@@ -2721,7 +2751,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                 ) : (
                   <select style={S.fInput} value={formData.leadId} required onChange={e => handleLeadSelect(e.target.value)}>
                     <option value="">Select a Lead</option>
-                    {visibleLeads.map(l => <option key={l.leadId} value={l.leadId}>{l.leadId} — {l.accountName}</option>)}
+                    {leadWorkspaceLeads.map(l => <option key={l.leadId} value={l.leadId}>{l.leadId} — {l.accountName}</option>)}
                   </select>
                 )}
               </div>
@@ -2749,7 +2779,11 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               </div>
               <div style={S.formField}>
                 <label style={S.fLabel}>Initiated By *</label>
-                <input style={S.fInput} value={formData.handledBy} onChange={e => setFormData({ ...formData, handledBy: e.target.value })} />
+                <input
+                  style={S.fInput}
+                  value={formData.handledBy}
+                  onChange={e => setFormData({ ...formData, handledBy: e.target.value })}
+                />
               </div>
               <div style={S.formField}>
                 <label style={S.fLabel}>Engagement Type</label>
@@ -3132,7 +3166,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                     <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
                       <select value={actionAssignedTo} onChange={e => setActionAssignedTo(e.target.value)} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 220 }}>
                         <option value="">Assign to user</option>
-                        {assignableUsers.map((username) => <option key={username} value={username}>{username}</option>)}
+                        {getLeadAssignableUsers(formData).map((username) => <option key={username} value={username}>{username}</option>)}
                       </select>
                     </div>
                   )}
@@ -3328,7 +3362,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
             </>
             )}
             <div style={{ padding: "0 24px 24px", display: "flex", gap: 10 }}>
-              <button type="submit" style={S.btnPrimary}>{editingId ? "Save Changes" : "Add Lead"}</button>
+              <button type="submit" style={S.btnPrimary} disabled={!formCanManageActivity}>{editingId ? "Save Changes" : "Add Lead"}</button>
               <button type="button" onClick={resetForm} style={S.btnOutline}>Cancel</button>
             </div>
           </form>

@@ -6,7 +6,11 @@ import { logActivity } from "../firebase/activityLog";
 import DeleteModal from "../components/DeleteModal";
 import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
-import { canAccessLead, getSessionUser } from "../accessControl";
+import {
+  canUserSeeLead,
+  getRecordCollaborators,
+  getSessionUser,
+} from "../accessControl";
 import { getBusinessDayError, isBusinessDay } from "../utils/followUps";
 
 const STAGES = ["Initiation", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
@@ -138,6 +142,8 @@ type Lead = {
   followUpDate?: string;
   followUpTime?: string;
   remarks?: string;
+  recordViewableBy?: string[];
+  actions?: TimelineEntry[];
 };
 type ProspectLinkedLead = {
   linkedLeadId: string;
@@ -531,7 +537,12 @@ export default function ActivityDetail({
     () => getLeadDisplayDetails(selectedLead, selectedLead ? linkedLeads[selectedLead.leadId] : null),
     [selectedLead, linkedLeads]
   );
-  const hasLeadAccess = selectedActivity ? canAccessLead(user, selectedActivity.leadId) : true;
+  const selectedProspect = selectedActivity
+    ? leads.find((lead) => lead.leadId === selectedActivity.leadId) || null
+    : null;
+  const hasLeadAccess = selectedActivity
+    ? canUserSeeLead(user, selectedActivity as any, selectedProspect as any)
+    : true;
 
   useEffect(() => {
     if (selectedActivity) {
@@ -555,6 +566,17 @@ export default function ActivityDetail({
   const timelineEntries = normalizeTimelineEntries(draft.actions || []).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
+  const assignableActionUsers = useMemo(() => {
+    if (user.role === "admin" && String(user.username || "").trim().toLowerCase() === "admin" && String(user.email || "").trim().toLowerCase() === "admin@leadtracker.app") {
+      return assignableUsers;
+    }
+    const collaborators = getRecordCollaborators(
+      String(draft.handledBy || "").trim(),
+      (draft.actions || []) as Array<{ assignedTo?: string | null }>
+    );
+    if (collaborators.length <= 1) return assignableUsers;
+    return assignableUsers.filter((username) => collaborators.includes(username));
+  }, [assignableUsers, draft.actions, draft.handledBy, user.email, user.role, user.username]);
   const filteredTimelineEntries = useMemo(() => {
     const primaryFiltered =
       timelineFilter === "all" ? timelineEntries : timelineEntries.filter((entry) => entry.category === timelineFilter);
@@ -1506,7 +1528,7 @@ export default function ActivityDetail({
                 <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
                   <select value={actionAssignedTo} onChange={(e) => setActionAssignedTo(e.target.value)} style={{ ...S.fInput, width: 220 }}>
                     <option value="">Assign to user</option>
-                    {assignableUsers.map((username) => (
+                    {assignableActionUsers.map((username) => (
                       <option key={username} value={username}>
                         {username}
                       </option>

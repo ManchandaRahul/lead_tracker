@@ -31,9 +31,13 @@ export default async function handler(req, res) {
 
     const adminUserSnap = await firestore.collection("users").doc(decoded.uid).get();
     const adminUser = adminUserSnap.data();
+    const isPrimaryAdmin =
+      adminUser?.role === "admin" &&
+      String(adminUser?.username || "").trim().toLowerCase() === "admin" &&
+      String(adminUser?.email || "").trim().toLowerCase() === "admin@leadtracker.app";
 
-    if (!adminUserSnap.exists || adminUser?.role !== "admin" || adminUser?.status !== "active") {
-      return sendJson(res, 403, { error: "Only active admins can create users." });
+    if (!adminUserSnap.exists || adminUser?.status !== "active" || !isPrimaryAdmin) {
+      return sendJson(res, 403, { error: "Only the primary admin account can create users." });
     }
 
     const {
