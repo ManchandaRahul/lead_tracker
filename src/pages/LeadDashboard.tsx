@@ -64,6 +64,7 @@ const EMPTY_LEAD = {
   status: "Active",
   prospectType: "",
   handledBy: "",
+  managedBy: "",
   url: "",
   statusComment: "",
   followUpDate: "",
@@ -161,6 +162,7 @@ const EXCEL_MAP: Record<string, keyof typeof EMPTY_LEAD> = {
   "Status": "status",
   "Prospect Type": "prospectType",
   "Handled By": "handledBy",
+  "Managed By": "managedBy",
   "URL": "url",
   "Follow Up Date": "followUpDate",
   "Follow Up Time": "followUpTime",
@@ -716,6 +718,10 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
         .filter((value: string) => Boolean(value) && !isPrimaryAdminUsername(value))
     )
   );
+  const canEditRecordViewableBy =
+    isSuperAdmin ||
+    String((formData as any).handledBy || "").trim().toLowerCase() === String(user.username || "").trim().toLowerCase() ||
+    String((formData as any).managedBy || "").trim().toLowerCase() === String(user.username || "").trim().toLowerCase();
   const recordViewableByOptions = assignableUsers.filter(
     (username) => !isPrimaryAdminUsername(username) && !selectedRecordViewableByUsers.includes(username)
   );
@@ -1492,6 +1498,16 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                 {formErrors.handledBy && <span style={{ color: "#ef4444", fontSize: 11, marginTop: 3 }}>{formErrors.handledBy}</span>}
               </div>
               <div style={S.formField}>
+                <label style={S.fLabel}>Managed By</label>
+                <input
+                  style={S.fInput}
+                  value={(formData as any).managedBy || ""}
+                  onChange={(e) => {
+                    setFormData({ ...formData, managedBy: e.target.value });
+                  }}
+                />
+              </div>
+              <div style={S.formField}>
                 <label style={S.fLabel}>Prospect Type{editingId ? "" : " *"}</label>
                 <select
                   style={{ ...S.fInput, borderColor: formErrors.prospectType ? "#ef4444" : "" }}
@@ -1560,12 +1576,18 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                               type="button"
                               title={username}
                               onClick={() =>
+                                canEditRecordViewableBy &&
                                 setFormData({
                                   ...formData,
                                   recordViewableBy: selectedRecordViewableByUsers.filter((value) => value !== username),
                                 })
                               }
-                              style={{ ...S.userPill, ...S.userPillSelected }}
+                              disabled={!canEditRecordViewableBy}
+                              style={{
+                                ...S.userPill,
+                                ...S.userPillSelected,
+                                ...(canEditRecordViewableBy ? {} : S.userPillDisabled),
+                              }}
                             >
                               <span style={S.userPillText}>{username}</span>
                               <span style={S.userPillClose}>×</span>
@@ -1586,12 +1608,17 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                               type="button"
                               title={username}
                               onClick={() =>
+                                canEditRecordViewableBy &&
                                 setFormData({
                                   ...formData,
                                   recordViewableBy: Array.from(new Set([...selectedRecordViewableByUsers, username])),
                                 })
                               }
-                              style={S.userPill}
+                              disabled={!canEditRecordViewableBy}
+                              style={{
+                                ...S.userPill,
+                                ...(canEditRecordViewableBy ? {} : S.userPillDisabled),
+                              }}
                             >
                               <span style={S.userPillPlus}>+</span>
                               <span style={S.userPillText}>{username}</span>
@@ -1885,7 +1912,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                     </select>
                   </td>}
                   {visibleCols["Initiated By"] && <td style={S.td}>{(lead as any).handledBy || "-"}</td>}
-                  {visibleCols["Managed By"] && <td style={S.td}>{latestAssignedAction?.assignedTo || "-"}</td>}
+                  {visibleCols["Managed By"] && <td style={S.td}>{(lead as any).managedBy || latestAssignedAction?.assignedTo || "-"}</td>}
                   {visibleCols["Client SPOC"] && <td style={S.td}>{lead.clientSpoc}</td>}
                   {visibleCols["Client Email"] && <td style={{ ...S.td, color: "#2563eb" }}>
                     {lead.clientEmail ? <a href={`mailto:${lead.clientEmail}`} style={{ color: "#2563eb" }}>{lead.clientEmail}</a> : "-"}
@@ -2285,6 +2312,11 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: "#64748b",
   },
+  userPickerHelper: {
+    fontSize: 12,
+    color: "#64748b",
+    lineHeight: 1.5,
+  },
   userPill: {
     display: "inline-flex",
     alignItems: "center",
@@ -2298,6 +2330,10 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 13,
     fontWeight: 600,
     cursor: "pointer",
+  },
+  userPillDisabled: {
+    opacity: 0.55,
+    cursor: "not-allowed",
   },
   userPillSelected: {
     border: "1px solid #fca5a5",
