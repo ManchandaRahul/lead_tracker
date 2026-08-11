@@ -266,7 +266,8 @@ function normalizeStageLabel(value: string) {
 }
 
 function normalizeLeadTimelineEntries(entries: any[] = []): LeadTimelineEntry[] {
-  return entries.map((entry, index) => {
+  const safeEntries = Array.isArray(entries) ? entries : [];
+  return safeEntries.map((entry, index) => {
     const createdAt = entry.createdAt || entry.timestamp || new Date().toISOString();
     const category = String(entry.category || entry.type || "note").toLowerCase() as TimelineCategory;
     return {
@@ -685,19 +686,6 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   }, [leads, editingId, importResult]);
 
   const openLeadActions = (lead: Lead) => {
-    const relatedTransactions = transactions
-      .filter((transaction) => transaction.leadId === lead.leadId)
-      .sort((a, b) => {
-        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
-        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
-        return bTime - aTime;
-      });
-
-    if (relatedTransactions.length > 0) {
-      onNavigate("activityDetail", relatedTransactions[0].transactionId);
-      return;
-    }
-
     onNavigate("transactions", lead.leadId);
   };
 

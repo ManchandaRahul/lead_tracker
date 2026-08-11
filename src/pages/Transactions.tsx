@@ -630,8 +630,9 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       : [createEmptyDealItem()],
   });
 
-  const normalizeTimelineEntries = (entries: any[] = []): TimelineEntry[] =>
-    entries.map((entry, index) => {
+  const normalizeTimelineEntries = (entries: any[] = []): TimelineEntry[] => {
+    const safeEntries = Array.isArray(entries) ? entries : [];
+    return safeEntries.map((entry, index) => {
       const category = (entry.category || entry.type?.toLowerCase?.() || "update") as TimelineCategory;
       const createdAt = entry.createdAt || entry.timestamp || new Date().toISOString();
       return {
@@ -649,6 +650,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
         assignedTo: entry.assignedTo || "",
       };
     });
+  };
 
   const createTimelineEntry = (
     category: TimelineCategory,

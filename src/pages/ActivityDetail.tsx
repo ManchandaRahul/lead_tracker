@@ -347,7 +347,8 @@ function formatDisplayDate(value?: string) {
 }
 
 function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
-  return entries.map((entry, index) => {
+  const safeEntries = Array.isArray(entries) ? entries : [];
+  return safeEntries.map((entry, index) => {
     const category = (entry.category || entry.type?.toLowerCase?.() || "update") as TimelineCategory;
     const createdAt = entry.createdAt || entry.timestamp || new Date().toISOString();
       return {
