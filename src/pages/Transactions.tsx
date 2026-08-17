@@ -96,6 +96,7 @@ const EMPTY_ACTIVITY = {
   followUpTime: "",
   stage: "Initiation",
   handledBy: "",
+  managedBy: "",
   attachDocumentsEnabled: false,
   attachDocumentsUrl: "",
   dashboardEnabled: false,
@@ -2388,7 +2389,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       "End Date":      (a) => (a as any).endDate || "",
       "Stage":         (a) => a.stage,
       "Initiated By":  (a) => a.handledBy,
-      "Managed By":    (a) => getLatestAssignedAction(a.actions || [])?.assignedTo || "",
+      "Managed By":    (a) => (a as any).managedBy || getLatestAssignedAction(a.actions || [])?.assignedTo || "",
       "Notes":         (a) => normalizeActionTextRichV2(a.notes || ""),
       "Actions":       (a) => formatActionsForExport(a),
     };
@@ -2831,9 +2832,9 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
               <div style={S.formField}>
                 <label style={S.fLabel}>Managed By</label>
                 <input
-                  style={{ ...S.fInput, background: "#f1f5f9" }}
-                  value={getLatestAssignedAction(formData.actions || [])?.assignedTo || ""}
-                  readOnly
+                  style={S.fInput}
+                  value={(formData as any).managedBy || ""}
+                  onChange={e => setFormData({ ...formData, managedBy: e.target.value })}
                 />
               </div>
               <div style={S.formField}>
@@ -3556,7 +3557,7 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                       </span>
                     </td>}
                     {visibleCols["Initiated By"] && <td style={S.td}>{a.handledBy || "-"}</td>}
-                    {visibleCols["Managed By"] && <td style={S.td}>{getLatestAssignedAction(a.actions || [])?.assignedTo || "-"}</td>}
+                    {visibleCols["Managed By"] && <td style={S.td}>{(a as any).managedBy || getLatestAssignedAction(a.actions || [])?.assignedTo || "-"}</td>}
                     {visibleCols["Notes"] && <td style={{ ...S.td, minWidth: 200, maxWidth: 260, whiteSpace: "pre-wrap", color: "#64748b", fontSize: 12 }}>
                       {a.notes ? (
                         <span>
