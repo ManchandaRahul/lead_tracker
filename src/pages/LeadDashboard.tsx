@@ -8,6 +8,9 @@ import {
   deleteDoc,
   doc,
   setDoc,
+  getDocs,
+  query,
+  where,
 } from "firebase/firestore";
 import { logActivity } from "../firebase/activityLog";
 import { signOut } from "firebase/auth";
@@ -41,6 +44,15 @@ const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
   Test: { bg: "#ede9fe", color: "#7c3aed" },
   Hold: { bg: "#fef3c7", color: "#b45309" },
   "Converted to Deal": { bg: "#dbeafe", color: "#1d4ed8" },
+};
+
+const PROSPECT_STATUS_HELP_TEXT: Record<string, string> = {
+  "Total Prospects": "Shows the total number of prospects currently visible on this page.",
+  "Active": "Prospects that are currently being worked on or followed up.",
+  "Inactive": "Prospects that are no longer active and are currently closed or paused.",
+  "Test": "Prospects marked for testing, validation, or internal checking.",
+  "Hold": "Prospects temporarily paused and waiting for the next action or update.",
+  "Converted to Deal": "Prospects that have progressed and already been converted into deal work.",
 };
 
 const EMPTY_LEAD = {
@@ -643,6 +655,24 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     await setDoc(doc(db, LINKED_LEAD_COLLECTION, payload.linkedLeadId), payload, { merge: true });
   };
 
+  const syncProspectStatusToRelatedLeads = async (prospectLeadId: string, nextStatus: string) => {
+    if (!prospectLeadId || nextStatus !== "Inactive") return;
+    const relatedActivitiesSnap = await getDocs(
+      query(collection(db, "transactions"), where("leadId", "==", prospectLeadId))
+    );
+    const updatedAt = new Date().toISOString();
+    await Promise.all(
+      relatedActivitiesSnap.docs.map((activityDoc) => {
+        const currentStage = normalizeStageLabel(String(activityDoc.data().stage || ""));
+        if (currentStage === "On Hold") return Promise.resolve();
+        return updateDoc(doc(db, "transactions", activityDoc.id), {
+          stage: "On Hold",
+          updatedAt,
+        });
+      })
+    );
+  };
+
   // ── Realtime Firebase listener ──
   useEffect(() => {
     const unsub = onSnapshot(collection(db, COLLECTION), (snap) => {
@@ -871,6 +901,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       if (editingId) {
         await updateDoc(doc(db, COLLECTION, editingId), prospectPayload);
         await syncLinkedLeadRecord(prospectPayload as Lead, editingId, payload as Lead);
+        if (previousStatus !== payload.status) {
+          await syncProspectStatusToRelatedLeads(payload.leadId, payload.status);
+        }
         await logActivity(payload.leadId, payload.accountName, "leads", {
           actionType: "LEAD_EDITED",
           description: `Lead "${payload.accountName}" was edited`,
@@ -975,6 +1008,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
       statusComment,
       updatedAt: new Date().toISOString(),
     });
+    await syncProspectStatusToRelatedLeads(lead.leadId, newStatus);
     await logActivity(lead.leadId, lead.accountName, "leads", {
       actionType: "LEAD_STATUS_CHANGED",
       description: `Status changed from "${old}" → "${newStatus}"${statusComment ? `. Comment: ${statusComment}` : ""}`,
@@ -1326,13 +1360,14 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
 
       {/* ── Stats bar ── */}
       <div style={S.statsBar}>
-        <div style={S.statTotal}>
+        <div style={S.statTotal} title={PROSPECT_STATUS_HELP_TEXT["Total Prospects"]}>
           <span style={S.statNum}>{visibleLeads.length}</span>
           <span style={S.statLabel}>Total Prospects</span>
         </div>
         {stats.map(({ status, count }) => (
           <div
             key={status}
+            title={PROSPECT_STATUS_HELP_TEXT[status] || status}
             style={{ ...S.statChip, background: STATUS_COLORS[status]?.bg, color: STATUS_COLORS[status]?.color, cursor: "pointer", outline: statusFilter === status ? "2px solid currentColor" : "none" }}
             onClick={() => setStatusFilter(statusFilter === status ? "All" : status)}
           >

@@ -20,6 +20,15 @@ import { getBusinessDayError, isBusinessDay } from "../utils/followUps";
 
 const STAGES = ["Initiation", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
 const LINKED_LEAD_COLLECTION = "prospectLinkedLeads";
+const STAGE_HELP_TEXT: Record<string, string> = {
+  "Total Leads": "Shows the total number of leads currently visible on this page.",
+  "Initiation": "Newly opened leads where the first level of follow-up or qualification has started.",
+  "Kickoff": "Leads that have moved into formal coordination, planning, or structured execution.",
+  "In Progress": "Active leads where ongoing work, follow-up, or delivery discussion is happening.",
+  "On Hold": "Leads temporarily paused because they are blocked, delayed, or awaiting a future follow-up.",
+  "Review": "Leads currently under internal, client, or proposal review before the next step.",
+  "Completed": "Leads that have been fully completed or closed successfully.",
+};
 
 const STAGE_COLORS: Record<string, { bg: string; color: string }> = {
   "Initiation": { bg: "#f0fdf4", color: "#15803d" },
@@ -36,6 +45,13 @@ function getTextPreview(value?: string, maxLength = 140) {
   const normalized = normalizeActionTextRichV2(String(value || ""));
   if (!normalized) return "";
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength).trimEnd()}...` : normalized;
+}
+
+function normalizeOptionalResourceUrl(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^www\./i.test(raw)) return raw;
+  return raw.replace(/^https?:\/\//i, "");
 }
 
 type DealItem = {
@@ -80,6 +96,10 @@ const EMPTY_ACTIVITY = {
   followUpTime: "",
   stage: "Initiation",
   handledBy: "",
+  attachDocumentsEnabled: false,
+  attachDocumentsUrl: "",
+  dashboardEnabled: false,
+  dashboardUrl: "",
   notes: "",
   isDeal: false,
   dealName: "",
@@ -911,6 +931,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       const basePayload = {
         ...formData,
         stage: normalizeStageValue(formData.stage),
+        attachDocumentsUrl: (formData as any).attachDocumentsEnabled ? normalizeOptionalResourceUrl((formData as any).attachDocumentsUrl) : "",
+        dashboardUrl: (formData as any).dashboardEnabled ? normalizeOptionalResourceUrl((formData as any).dashboardUrl) : "",
         notes: normalizeActionTextRichV2(formData.notes || ""),
         actions: normalizeTimelineEntries(formData.actions || []),
         followUpOwnerUsername: nextFollowUpOwnerUsername,
@@ -960,6 +982,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     const basePayload = {
       ...sourceData,
       stage: normalizeStageValue(sourceData.stage),
+      attachDocumentsUrl: (sourceData as any).attachDocumentsEnabled ? normalizeOptionalResourceUrl((sourceData as any).attachDocumentsUrl) : "",
+      dashboardUrl: (sourceData as any).dashboardEnabled ? normalizeOptionalResourceUrl((sourceData as any).dashboardUrl) : "",
       notes: normalizeActionTextRichV2(sourceData.notes || ""),
       actions: normalizeTimelineEntries(sourceData.actions || []),
       followUpOwnerUsername: nextFollowUpOwnerUsername,
@@ -2691,12 +2715,13 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
       )}
 
       <div style={S.statsBar}>
-        <div style={S.statTotal}>
+        <div style={S.statTotal} title={STAGE_HELP_TEXT["Total Leads"]}>
           <span style={S.statNum}>{scopedActivities.length}</span>
           <span style={S.statLabel}>Total Leads</span>
         </div>
         {stats.map(({ stage, count }) => (
           <div key={stage} onClick={() => setStageFilter(stageFilter === stage ? "All" : stage)}
+            title={STAGE_HELP_TEXT[stage] || stage}
             style={{ ...S.statChip, background: STAGE_COLORS[stage]?.bg, color: STAGE_COLORS[stage]?.color, outline: stageFilter === stage ? "2px solid currentColor" : "none", cursor: "pointer" }}>
             <span style={{ fontWeight: 700, fontSize: 16 }}>{count}</span>
             <span style={{ fontSize: 11, marginTop: 2 }}>{stage}</span>
@@ -2811,6 +2836,106 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                   readOnly
                 />
               </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Attach Documents</label>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, minHeight: 44, padding: "8px 4px" }}>
+                  <span style={{ color: "#475569", fontSize: 13 }}>Enable to store a document link for this lead.</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        attachDocumentsEnabled: !(prev as any).attachDocumentsEnabled,
+                        ...((prev as any).attachDocumentsEnabled ? { attachDocumentsUrl: "" } : {}),
+                      }))
+                    }
+                    style={{
+                      width: 48,
+                      height: 28,
+                      borderRadius: 9999,
+                      border: "none",
+                      background: (formData as any).attachDocumentsEnabled ? "#84cc16" : "#cbd5e1",
+                      position: "relative",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: 3,
+                        left: (formData as any).attachDocumentsEnabled ? 23 : 3,
+                        width: 22,
+                        height: 22,
+                        borderRadius: "50%",
+                        background: "#fff",
+                        transition: "left 0.2s ease",
+                        boxShadow: "0 2px 6px rgba(15,23,42,0.15)",
+                      }}
+                    />
+                  </button>
+                </div>
+              </div>
+              <div style={S.formField}>
+                <label style={S.fLabel}>Dashboard</label>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, minHeight: 44, padding: "8px 4px" }}>
+                  <span style={{ color: "#475569", fontSize: 13 }}>Enable to store a dashboard link for this lead.</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        dashboardEnabled: !(prev as any).dashboardEnabled,
+                        ...((prev as any).dashboardEnabled ? { dashboardUrl: "" } : {}),
+                      }))
+                    }
+                    style={{
+                      width: 48,
+                      height: 28,
+                      borderRadius: 9999,
+                      border: "none",
+                      background: (formData as any).dashboardEnabled ? "#84cc16" : "#cbd5e1",
+                      position: "relative",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: 3,
+                        left: (formData as any).dashboardEnabled ? 23 : 3,
+                        width: 22,
+                        height: 22,
+                        borderRadius: "50%",
+                        background: "#fff",
+                        transition: "left 0.2s ease",
+                        boxShadow: "0 2px 6px rgba(15,23,42,0.15)",
+                      }}
+                    />
+                  </button>
+                </div>
+              </div>
+              {(formData as any).attachDocumentsEnabled && (
+                <div style={S.formField}>
+                  <label style={S.fLabel}>Documents URL</label>
+                  <input
+                    style={S.fInput}
+                    placeholder="www.example.com/documents"
+                    value={(formData as any).attachDocumentsUrl || ""}
+                    onChange={e => setFormData({ ...formData, attachDocumentsUrl: e.target.value })}
+                  />
+                </div>
+              )}
+              {(formData as any).dashboardEnabled && (
+                <div style={S.formField}>
+                  <label style={S.fLabel}>Dashboard URL</label>
+                  <input
+                    style={S.fInput}
+                    placeholder="www.example.com/dashboard"
+                    value={(formData as any).dashboardUrl || ""}
+                    onChange={e => setFormData({ ...formData, dashboardUrl: e.target.value })}
+                  />
+                </div>
+              )}
               {formData.stage === "On Hold" && (
                 <>
                   <div style={S.formField}>
