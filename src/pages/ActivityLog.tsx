@@ -195,9 +195,8 @@ export default function ActivityLog({ onNavigate }: { onNavigate: (p: Page, lead
                 const lastMeta = ACTION_META[lastEntry?.actionType];
 
                 return (
-                  <>
+                  <React.Fragment key={log.id}>
                     <tr
-                      key={log.id}
                       style={{ ...S.tr, background: isOpen ? "#f8fafc" : "" }}
                       onMouseEnter={(e) => {
                         if (!isOpen) e.currentTarget.style.background = "#f8fafc";
@@ -282,7 +281,7 @@ export default function ActivityLog({ onNavigate }: { onNavigate: (p: Page, lead
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </tbody>

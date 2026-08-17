@@ -9,6 +9,7 @@ import DeleteModal from "../components/DeleteModal";
 import AppPageHeader from "../components/AppPageHeader";
 import { Page } from "../navigation";
 import {
+  canManageAssignedAction,
   canUserSeeLead,
   canUserSeeProspect,
   getRecordCollaborators,
@@ -562,6 +563,13 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     formSelectedLead,
     formSelectedLead ? linkedLeads[formSelectedLead.leadId] : null
   );
+  const formCanManageActivity =
+    !editingId ||
+    canManageAssignedAction(
+      user,
+      String(formData.handledBy || "").trim(),
+      ((formData.actions || []) as Array<{ assignedTo?: string | null }>)
+    );
   const isLeadWorkspace = !!routeLeadId;
   const scopedActivities = routeLeadId
     ? visibleActivities.filter((activity) => activity.leadId === routeLeadId)

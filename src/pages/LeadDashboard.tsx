@@ -1249,7 +1249,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   };
 
   const saveEditedProspectNote = (entryId: string) => {
-    const normalizedDescription = normalizeActionTextRichV2(editingProspectNoteDescription || "");
+    const normalizedDescription = normalizeLeadTextRichV2(editingProspectNoteDescription || "");
     if (!normalizedDescription.trim()) {
       setFormErrors((prev) => ({ ...prev, actionDescription: "Please enter note details before saving." }));
       return;

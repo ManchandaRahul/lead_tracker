@@ -65,7 +65,8 @@ type FollowUpItem = {
 };
 
 function normalizeTimelineEntries(entries: any[] = []): TimelineEntry[] {
-  return entries.map((entry, index) => {
+  const safeEntries = Array.isArray(entries) ? entries : [];
+  return safeEntries.map((entry, index) => {
     const createdAt = entry.createdAt || entry.timestamp || new Date().toISOString();
     return {
       id: entry.id || `${createdAt}_${index}`,
