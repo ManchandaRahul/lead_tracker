@@ -48,7 +48,7 @@ const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
 
 const PROSPECT_STATUS_HELP_TEXT: Record<string, string> = {
   "Total Prospects": "Shows the total number of prospects currently visible on this page.",
-  "Active": "Prospects that are currently being worked on or followed up.",
+  "Active": "Prospects that are currently being worked or followed up with.",
   "Inactive": "Prospects that are no longer active and are currently closed or paused.",
   "Test": "Prospects marked for testing, validation, or internal checking.",
   "Hold": "Prospects temporarily paused and waiting for the next action or update.",
@@ -255,6 +255,15 @@ function normalizeWebsiteUrl(value: unknown) {
     return `www.${withoutProtocol.replace(/^www\./i, "")}`;
   }
   return raw;
+}
+
+function formatDisplayDate(value: unknown) {
+  const normalized = normalizeImportedDate(value);
+  if (!normalized) return "";
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return normalized;
+  const [, year, month, day] = match;
+  return `${day}-${month}-${year}`;
 }
 
 function isPrimaryAdminUsername(value: unknown) {
@@ -664,9 +673,9 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
     await Promise.all(
       relatedActivitiesSnap.docs.map((activityDoc) => {
         const currentStage = normalizeStageLabel(String(activityDoc.data().stage || ""));
-        if (currentStage === "On Hold") return Promise.resolve();
+        if (currentStage === "Inactive") return Promise.resolve();
         return updateDoc(doc(db, "transactions", activityDoc.id), {
-          stage: "On Hold",
+          stage: "Inactive",
           updatedAt,
         });
       })
@@ -1023,7 +1032,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
   const downloadExcel = () => {
     // Full row map
     const allCols: Record<string, (l: Lead) => any> = {
-      "Prospect Date":      (l) => l.leadDate || "",
+      "Prospect Date":      (l) => formatDisplayDate(l.leadDate || ""),
       "Client Name":        (l) => l.accountName,
       "Program Name":       (l) => getLeadDisplayDetails(l, linkedLeads[l.leadId]).programName,
       "Project Name":       (l) => getLeadDisplayDetails(l, linkedLeads[l.leadId]).projectName,
@@ -1916,7 +1925,7 @@ export default function LeadDashboard({ onNavigate }: { onNavigate: (p: Page, le
                     const latestAssignedAction = getLatestAssignedLeadAction((lead as any).actions || []);
                     return (
                       <>
-                  {visibleCols["Prospect Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{lead.leadDate || "-"}</td>}
+                  {visibleCols["Prospect Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{formatDisplayDate(lead.leadDate) || "-"}</td>}
                   {visibleCols["Client Name"] && (
                     <td style={{ ...S.tdClientSticky, minWidth: 140 }}>
                       <button

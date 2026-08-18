@@ -18,16 +18,17 @@ import {
 } from "../accessControl";
 import { getBusinessDayError, isBusinessDay } from "../utils/followUps";
 
-const STAGES = ["Initiation", "Kickoff", "In Progress", "On Hold", "Review", "Completed"];
+const STAGES = ["Initiation", "Kickoff", "In Progress", "On Hold", "Review", "Completed", "Inactive"];
 const LINKED_LEAD_COLLECTION = "prospectLinkedLeads";
 const STAGE_HELP_TEXT: Record<string, string> = {
-  "Total Leads": "Shows the total number of leads currently visible on this page.",
+  "Total Leads": "Total Number of leads (Active + Inactive + Hold etc).",
   "Initiation": "Newly opened leads where the first level of follow-up or qualification has started.",
   "Kickoff": "Leads that have moved into formal coordination, planning, or structured execution.",
   "In Progress": "Active leads where ongoing work, follow-up, or delivery discussion is happening.",
   "On Hold": "Leads temporarily paused because they are blocked, delayed, or awaiting a future follow-up.",
   "Review": "Leads currently under internal, client, or proposal review before the next step.",
   "Completed": "Leads that have been fully completed or closed successfully.",
+  "Inactive": "Leads that are no longer active because the linked prospect has been marked inactive.",
 };
 
 const STAGE_COLORS: Record<string, { bg: string; color: string }> = {
@@ -37,6 +38,7 @@ const STAGE_COLORS: Record<string, { bg: string; color: string }> = {
   "On Hold":     { bg: "#f3f4f6", color: "#374151" },
   "Review":      { bg: "#ede9fe", color: "#7c3aed" },
   "Completed":   { bg: "#dcfce7", color: "#16a34a" },
+  "Inactive":    { bg: "#fee2e2", color: "#dc2626" },
 };
 
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
@@ -419,6 +421,7 @@ function getActionCategory(action: "Note" | "Call" | "Meeting"): TimelineCategor
 
 function deriveImportedStage(...texts: string[]) {
   const haystack = texts.join(" ").toLowerCase();
+  if (/inactive/.test(haystack)) return "Inactive";
   if (/completed|complete|go live|go-live|running as required|completed successfully/.test(haystack)) return "Completed";
   if (/on hold|hold currently/.test(haystack)) return "On Hold";
   if (/review/.test(haystack)) return "Review";
@@ -428,7 +431,8 @@ function deriveImportedStage(...texts: string[]) {
 }
 
 function normalizeStageValue(value?: string) {
-  return value === "Initial Call" ? "Initiation" : (value || "Initiation");
+  if (value === "Initial Call") return "Initiation";
+  return value || "Initiation";
 }
 
 function deriveImportedActivityName(_statusText: string, projectName: string, clientName: string) {
