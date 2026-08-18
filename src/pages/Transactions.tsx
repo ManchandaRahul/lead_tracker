@@ -259,6 +259,15 @@ function parseImportedActivityDate(value: unknown) {
   return today;
 }
 
+function formatDisplayDate(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return raw;
+  const [, year, month, day] = match;
+  return `${day}-${month}-${year}`;
+}
+
 function normalizeActionText(value: string) {
   const lines = String(value || "")
     .replace(/\r\n?/g, "\n")
@@ -2389,8 +2398,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
     const allCols: Record<string, (a: Activity) => any> = {
       "Client Name":   (a) => a.accountName,
       "Project Name":  (a) => a.activityName,
-      "Start Date":    (a) => a.activityDate,
-      "End Date":      (a) => (a as any).endDate || "",
+      "Start Date":    (a) => formatDisplayDate(a.activityDate),
+      "End Date":      (a) => formatDisplayDate((a as any).endDate || ""),
       "Stage":         (a) => a.stage,
       "Initiated By":  (a) => a.handledBy,
       "Managed By":    (a) => (a as any).managedBy || getLatestAssignedAction(a.actions || [])?.assignedTo || "",
@@ -3553,8 +3562,8 @@ export default function Transactions({ onNavigate, routeLeadId }: { onNavigate: 
                     onMouseLeave={e => (e.currentTarget.style.background = "")}>
                     {visibleCols["Client Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 140 }}>{a.accountName}</td>}
                     {visibleCols["Project Name"] && <td style={{ ...S.td, fontWeight: 600, minWidth: 160 }}>{a.activityName}</td>}
-                    {visibleCols["Start Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{a.activityDate || "-"}</td>}
-                    {visibleCols["End Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{(a as any).endDate || "-"}</td>}
+                    {visibleCols["Start Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{formatDisplayDate(a.activityDate) || "-"}</td>}
+                    {visibleCols["End Date"] && <td style={{ ...S.td, whiteSpace: "nowrap", color: "#64748b" }}>{formatDisplayDate((a as any).endDate) || "-"}</td>}
                     {visibleCols["Stage"] && <td style={S.td}>
                       <span style={{ padding: "4px 10px", borderRadius: 20, fontWeight: 600, fontSize: 12, background: STAGE_COLORS[a.stage]?.bg, color: STAGE_COLORS[a.stage]?.color, whiteSpace: "nowrap" }}>
                         {a.stage}
